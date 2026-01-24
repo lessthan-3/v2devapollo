@@ -24,7 +24,7 @@ void setup() {
 
   // Initialize the display
   tft.init();
-  tft.setRotation(0);  // 0=Portrait, 1=Landscape, 2=Portrait inverted, 3=Landscape inverted
+  tft.setRotation(1);  // 0=Portrait, 1=Landscape, 2=Portrait inverted, 3=Landscape inverted
   
   // Fill screen with black
   tft.fillScreen(TFT_BLACK);

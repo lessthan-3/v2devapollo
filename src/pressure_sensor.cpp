@@ -4,6 +4,7 @@
  */
 
 #include "pressure_sensor.h"
+#include "driver/gpio.h"  // For gpio_set_drive_capability
 
 // Global instance
 PressureSensor pressureSensor;
@@ -15,24 +16,134 @@ PressureSensor::PressureSensor()
 }
 
 bool PressureSensor::begin() {
-    // Configure CSB pin as output and pull low for I2C mode
-    pinMode(PRESSURE_CSB_PIN, OUTPUT);
-    digitalWrite(PRESSURE_CSB_PIN, LOW);
+    Serial.println("Pressure sensor: Starting initialization...");
     
-    // Small delay to let the sensor recognize I2C mode
+    // Debug: Check pin states before I2C initialization to detect stuck bus or missing pullups
+    // Reset pins first
+    pinMode(PRESSURE_SDA_PIN, INPUT);
+    pinMode(PRESSURE_SCL_PIN, INPUT);
+    delay(10);
+    
+    int sda = digitalRead(PRESSURE_SDA_PIN);
+    int scl = digitalRead(PRESSURE_SCL_PIN);
+    
+    Serial.printf("DEBUG: Pre-init Pin States - SDA: %s, SCL: %s\n", 
+                  sda == HIGH ? "HIGH" : "LOW", 
+                  scl == HIGH ? "HIGH" : "LOW");
+
+    // If bus is stuck low, attempt recovery
+    if (sda == LOW || scl == LOW) {
+        Serial.println("DEBUG: I2C Bus stuck LOW. Attempting recovery sequence...");
+        
+        // Try to toggle SCL to release stuck SDA
+        pinMode(PRESSURE_SDA_PIN, INPUT);
+        pinMode(PRESSURE_SCL_PIN, OUTPUT);
+        
+        // 9 clocks to flush out any stuck slave
+        for(int i = 0; i < 9; i++) {
+            digitalWrite(PRESSURE_SCL_PIN, LOW);
+            delayMicroseconds(10);
+            digitalWrite(PRESSURE_SCL_PIN, HIGH);
+            delayMicroseconds(10);
+        }
+        
+        // Generate STOP condition
+        pinMode(PRESSURE_SDA_PIN, OUTPUT);
+        digitalWrite(PRESSURE_SDA_PIN, LOW);
+        delayMicroseconds(10);
+        digitalWrite(PRESSURE_SCL_PIN, HIGH);
+        delayMicroseconds(10);
+        digitalWrite(PRESSURE_SDA_PIN, HIGH);
+        delayMicroseconds(10);
+        
+        // Check again
+        pinMode(PRESSURE_SCL_PIN, INPUT_PULLUP);
+        pinMode(PRESSURE_SDA_PIN, INPUT_PULLUP);
+        delay(10);
+        sda = digitalRead(PRESSURE_SDA_PIN);
+        scl = digitalRead(PRESSURE_SCL_PIN);
+        Serial.printf("DEBUG: Post-recovery Pin States - SDA: %s, SCL: %s\n", 
+                      sda == HIGH ? "HIGH" : "LOW", 
+                      scl == HIGH ? "HIGH" : "LOW");
+    }
+
+    // CSB pin: HIGH or floating = I2C mode, LOW = SPI mode
+    // Try pulling HIGH first since floating may not be reliable on all boards
+    // pinMode(PRESSURE_CSB_PIN, OUTPUT);
+    // digitalWrite(PRESSURE_CSB_PIN, HIGH);  // Explicitly set HIGH for I2C mode
+    
+    // Serial.printf("Pressure sensor: CSB pin %d configured as floating input for I2C mode\n", 
+    //               PRESSURE_CSB_PIN);
+
+    //csb physically disonnected on PCB, no longer need to pull high
+    
+    // Allow sensor time to recognize I2C mode and stabilize
+    delay(100);
+    
+    // End any existing Wire instance before reinitializing
+    Wire.end();
     delay(10);
     
     // Initialize I2C with custom pins
-    Wire.begin(PRESSURE_SDA_PIN, PRESSURE_SCL_PIN);
-    Wire.setClock(100000);  // 100kHz I2C clock (standard mode)
+    // ESP32-S3 requires explicit pin configuration
+    if (!Wire.begin(PRESSURE_SDA_PIN, PRESSURE_SCL_PIN)) {
+        lastError = PRESSURE_ERR_I2C_BEGIN;
+        Serial.println("Pressure sensor: Wire.begin() failed");
+        return false;
+    }
+    
+    Wire.setClock(10000);  // 10kHz I2C clock (standard mode)
+    Wire.setTimeOut(1000);  // Increase timeout to 1 second
+    
+    // Give I2C bus time to stabilize
+    delay(50);
+    uint8_t error = 1;
+    
+    // Scan for the device on the I2C bus
+    while (error != 0) {
+        Wire.beginTransmission(PRESSURE_I2C_ADDR);
+        // pinMode(PRESSURE_SDA_PIN, INPUT);
+        // pinMode(PRESSURE_SCL_PIN, INPUT);
+        // delay(50); // Removed delay between begin and end transmission
+        uint8_t error = Wire.endTransmission();
+        if (error == 0) {
+                break;  // Device found
+            }
+        delay(100);
+    }
+        
+    Serial.printf("DEBUG: Wire.endTransmission() returned %d at address 0x%02X\n", error, PRESSURE_I2C_ADDR);
+    
+    if (error != 0) {
+        Serial.printf("Pressure sensor: I2C device not found at 0x%02X (error: %d)\n", 
+                      PRESSURE_I2C_ADDR, error);
+        
+        // Try alternate address (some devices use 0x6C or 0x6E)
+        Serial.println("Scanning I2C bus for pressure sensor...");
+        for (uint8_t addr = 0x08; addr < 0x78; addr++) {
+            Wire.beginTransmission(addr);
+            delay(50);
+            if (Wire.endTransmission() == 0) {
+                Serial.printf("  Found device at 0x%02X\n", addr);
+            }
+        }
+        
+        lastError = PRESSURE_ERR_I2C_BEGIN;
+        Serial.println("Pressure sensor: Failed to communicate");
+        return false;
+    }
+    
+    Serial.printf("Pressure sensor: Found at address 0x%02X\n", PRESSURE_I2C_ADDR);
     
     // Test communication by reading status register
     uint8_t status;
     if (!readRegister(REG_STATUS, &status)) {
         lastError = PRESSURE_ERR_I2C_BEGIN;
-        Serial.println("Pressure sensor: Failed to communicate");
+        Serial.println("Pressure sensor: Failed to read status register");
         return false;
     }
+    
+    Serial.printf("Pressure sensor: Status register = 0x%02X\n", status);
     
     initialized = true;
     continuousMode = false;
@@ -57,18 +168,22 @@ bool PressureSensor::writeRegister(uint8_t reg, uint8_t value) {
 }
 
 bool PressureSensor::readRegister(uint8_t reg, uint8_t* value) {
-    // Write register address
+    // Write register address with full stop (not repeated start)
+    // Some I2C devices and ESP32 have issues with repeated start
     Wire.beginTransmission(PRESSURE_I2C_ADDR);
     Wire.write(reg);
-    uint8_t result = Wire.endTransmission(false);  // Repeated start
+    uint8_t result = Wire.endTransmission(true);  // Full stop
     
     if (result != 0) {
         lastError = PRESSURE_ERR_I2C_WRITE;
         return false;
     }
     
+    // Small delay between write and read
+    delayMicroseconds(100);
+    
     // Read value
-    uint8_t bytesReceived = Wire.requestFrom(PRESSURE_I2C_ADDR, (uint8_t)1);
+    uint8_t bytesReceived = Wire.requestFrom((uint8_t)PRESSURE_I2C_ADDR, (uint8_t)1, (uint8_t)true);
     if (bytesReceived != 1) {
         lastError = PRESSURE_ERR_I2C_READ;
         return false;
@@ -79,18 +194,21 @@ bool PressureSensor::readRegister(uint8_t reg, uint8_t* value) {
 }
 
 bool PressureSensor::readRegisters(uint8_t startReg, uint8_t* buffer, uint8_t length) {
-    // Write starting register address
+    // Write starting register address with full stop
     Wire.beginTransmission(PRESSURE_I2C_ADDR);
     Wire.write(startReg);
-    uint8_t result = Wire.endTransmission(false);  // Repeated start
+    uint8_t result = Wire.endTransmission(true);  // Full stop
     
     if (result != 0) {
         lastError = PRESSURE_ERR_I2C_WRITE;
         return false;
     }
     
+    // Small delay between write and read
+    delayMicroseconds(100);
+    
     // Read multiple bytes
-    uint8_t bytesReceived = Wire.requestFrom(PRESSURE_I2C_ADDR, length);
+    uint8_t bytesReceived = Wire.requestFrom((uint8_t)PRESSURE_I2C_ADDR, length, (uint8_t)true);
     if (bytesReceived != length) {
         lastError = PRESSURE_ERR_I2C_READ;
         Serial.printf("Pressure sensor: Expected %d bytes, got %d\n", length, bytesReceived);

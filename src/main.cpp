@@ -1,10 +1,19 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <SPI.h>
+#include <ESP32Encoder.h>
 #include "pressure_sensor.h"
 
 // Create TFT display instance
 TFT_eSPI tft = TFT_eSPI();
+
+// Rotary encoder instance
+ESP32Encoder encoder;
+
+// Encoder pins
+#define ENCODER_CLK 41  // A (Right)
+#define ENCODER_DT  42  // B (Left)
+#define ENCODER_BTN 5   // Button
 
 // Backlight pin
 #define TFT_BL 21
@@ -41,6 +50,18 @@ void setup() {
   
   Serial.println("Display initialized successfully!");
   
+  // Initialize rotary encoder
+  ESP32Encoder::useInternalWeakPullResistors = puType::up;
+  encoder.attachHalfQuad(ENCODER_DT, ENCODER_CLK);
+  encoder.setCount(0);
+  
+  // Initialize encoder button
+  pinMode(ENCODER_BTN, INPUT_PULLUP);
+  
+  Serial.println("Encoder initialized");
+  tft.setTextColor(TFT_GREEN, TFT_BLACK);
+  tft.println("Encoder: OK");
+  
   // Initialize pressure sensor
   delay(100);  // Allow sensor to stabilize
   if (pressureSensor.begin()) {
@@ -69,6 +90,16 @@ void setup() {
   tft.println("Raw Value:");
   tft.setCursor(10, 140);
   tft.println("Normalized:");
+  
+  // Encoder labels
+  tft.setTextSize(2);
+  tft.setCursor(10, 180);
+  tft.println("ENCODER");
+  tft.setTextSize(1);
+  tft.setCursor(10, 210);
+  tft.println("Value:");
+  tft.setCursor(10, 230);
+  tft.println("Button:");
 }
 
 void loop() {
@@ -77,6 +108,40 @@ void loop() {
   static unsigned long lastUpdate = 0;
   static int counter = 0;
   static float smoothedPressure = 0.0f;
+  static int64_t lastEncoderValue = 0;
+  static bool lastButtonState = true;  // HIGH when not pressed (INPUT_PULLUP)
+  
+  // Read encoder
+  int64_t encoderValue = encoder.getCount();
+  bool buttonPressed = (digitalRead(ENCODER_BTN) == LOW);  // Active low
+  
+  // Update encoder display if value changed or button state changed
+  if (encoderValue != lastEncoderValue || buttonPressed != lastButtonState) {
+    lastEncoderValue = encoderValue;
+    lastButtonState = buttonPressed;
+    
+    // Display encoder value
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+    tft.setCursor(80, 210);
+    char encStr[16];
+    snprintf(encStr, sizeof(encStr), "%6lld  ", (long long)encoderValue);
+    tft.print(encStr);
+    
+    // Display button state
+    tft.setCursor(80, 230);
+    if (buttonPressed) {
+      tft.setTextColor(TFT_GREEN, TFT_BLACK);
+      tft.print("PRESSED ");
+    } else {
+      tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+      tft.print("Released");
+    }
+    
+    Serial.printf("Encoder: %lld | Button: %s\n", 
+                  (long long)encoderValue, 
+                  buttonPressed ? "PRESSED" : "Released");
+  }
   
   // Read pressure sensor
   if (millis() - lastPressureRead >= PRESSURE_READ_INTERVAL_MS) {

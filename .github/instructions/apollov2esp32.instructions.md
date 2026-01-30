@@ -15,9 +15,9 @@ The following is the pinout for all the peripherals used in this project:
   IO38 - Temperature Sensor (1-Wire)
 
   Pressure Sensor - WF1OODPZ 2BG S6 DT
-    IO17- CSB - pull low for for spi
-    IO18 - SDA - Data in/out for i2c / data out for spi
-    1019 - SCL - clock for i2c/spi
+    IO19- CSB - pull low for for spi
+    IO17 - SDA - Data in/out for i2c / data out for spi
+    IO18 - SCL - clock for i2c/spi
 
     From the documentation for WF100DPZ:
 

@@ -6,9 +6,9 @@
  * Sensor: WF100DPZ 2BG S6 DT (2 Bar Gauge range, ~0-30 PSI)
  * 
  * Pinout:
- *   IO17 - CSB (pulled low for I2C mode)
- *   IO18 - SDA (I2C Data)
- *   IO19 - SCL (I2C Clock)
+ *   IO19 - CSB (floating/high for I2C mode, low for SPI mode)
+ *   IO17 - SDA (I2C Data)
+ *   IO18 - SCL (I2C Clock)
  */
 
 #ifndef PRESSURE_SENSOR_H
@@ -18,9 +18,9 @@
 #include <Wire.h>
 
 // Pin definitions
-#define PRESSURE_CSB_PIN    17  // Chip select - pull low for I2C mode
-#define PRESSURE_SDA_PIN    18  // I2C Data
-#define PRESSURE_SCL_PIN    19  // I2C Clock
+#define PRESSURE_CSB_PIN    19  // Chip select - HIGH/floating for I2C, LOW for SPI
+#define PRESSURE_SDA_PIN    17  // I2C Data
+#define PRESSURE_SCL_PIN    18  // I2C Clock
 
 // I2C Configuration
 #define PRESSURE_I2C_ADDR   0x6D  // 7-bit address: 1101101

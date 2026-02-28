@@ -42,7 +42,10 @@
 // Pressure calculation constants
 #define PRESSURE_ZERO_POINT     8388608   // 2^23 - zero condition
 #define PRESSURE_FULL_SCALE     8388608.0f // Divisor for normalization
-#define PRESSURE_24BIT_MAX      16777216  // 2^24
+#define PRESSURE_24BIT_MAX      15977468  // 2^24 or the number found from testing
+
+#define PRESSURE_BAR_TO_PSI    14.5038f  // Conversion factor from Bar to PSI
+#define PRESSURE_MULTI        2 //multiplier for unit
 
 // Sensor range: 2BG = 2 Bar Gauge
 // 2 Bar = ~29.0075 PSI

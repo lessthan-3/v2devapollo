@@ -112,28 +112,10 @@ bool PressureSensor::begin() {
         delay(100);
     }
         
-    Serial.printf("DEBUG: Wire.endTransmission() returned %d at address 0x%02X\n", error, PRESSURE_I2C_ADDR);
+    // Serial.printf("DEBUG: Wire.endTransmission() returned %d at address 0x%02X\n", error, PRESSURE_I2C_ADDR);
     
-    if (error != 0) {
-        Serial.printf("Pressure sensor: I2C device not found at 0x%02X (error: %d)\n", 
-                      PRESSURE_I2C_ADDR, error);
-        
-        // Try alternate address (some devices use 0x6C or 0x6E)
-        Serial.println("Scanning I2C bus for pressure sensor...");
-        for (uint8_t addr = 0x08; addr < 0x78; addr++) {
-            Wire.beginTransmission(addr);
-            delay(50);
-            if (Wire.endTransmission() == 0) {
-                Serial.printf("  Found device at 0x%02X\n", addr);
-            }
-        }
-        
-        lastError = PRESSURE_ERR_I2C_BEGIN;
-        Serial.println("Pressure sensor: Failed to communicate");
-        return false;
-    }
     
-    Serial.printf("Pressure sensor: Found at address 0x%02X\n", PRESSURE_I2C_ADDR);
+    // Serial.printf("Pressure sensor: Found at address 0x%02X\n", PRESSURE_I2C_ADDR);
     
     // Test communication by reading status register
     uint8_t status;
@@ -247,17 +229,14 @@ bool PressureSensor::isDataReady() {
 }
 
 int32_t PressureSensor::convertRawToSigned(uint8_t msb, uint8_t csb, uint8_t lsb) {
-    // Combine bytes into 24-bit value
-    int32_t rawValue = ((int32_t)msb << 16) | ((int32_t)csb << 8) | (int32_t)lsb;
+    // Combine bytes into 24-bit UNSIGNED value
+    // Per WF100DPZ datasheet, the raw value is unsigned with zero point at 8388608 (2^23)
+    // Values below 8388608 = below zero pressure
+    // Values above 8388608 = above zero pressure
+    uint32_t rawValue = ((uint32_t)msb << 16) | ((uint32_t)csb << 8) | (uint32_t)lsb;
     
-    // Handle sign extension for 24-bit signed value
-    // If the MSB bit (bit 23) is set, the value is negative
-    if (rawValue & 0x800000) {
-        // Negative value: sign extend to 32-bit
-        rawValue |= 0xFF000000;
-    }
-    
-    return rawValue;
+    // Return as signed for easier arithmetic with zero point subtraction
+    return (int32_t)rawValue;
 }
 
 float PressureSensor::normalizedToBar(float normalized) {
@@ -294,6 +273,10 @@ PressureReading PressureSensor::readPressureData() {
     
     // Convert raw bytes to signed 24-bit value
     reading.rawValue = convertRawToSigned(buffer[0], buffer[1], buffer[2]);
+
+    // Serial.printf("Pressure sensor: Raw value = %ld (0x%06lX), Zero point = %ld\n", 
+    //               (long)reading.rawValue, (unsigned long)(reading.rawValue & 0xFFFFFF),
+    //               (long)PRESSURE_24BIT_MAX);
     
     // Calculate normalized value
     // Based on datasheet:
@@ -301,13 +284,12 @@ PressureReading PressureSensor::readPressureData() {
     // - Values below 8388608 are below zero pressure
     // - Values above 8388608 are above zero pressure
     // 
-    // Formula from datasheet (corrected):
-    // For values >= 0 (rawValue >= 8388608): normalized = (rawValue - 8388608) / 8388608
-    // For values < 0 (rawValue < 8388608): normalized = (rawValue - 8388608) / 8388608
-    // 
-    // Simplified: normalized = (rawValue - ZERO_POINT) / FULL_SCALE
-    
-    reading.normalizedValue = (float)(reading.rawValue - PRESSURE_ZERO_POINT) / PRESSURE_FULL_SCALE;
+    // normalized = (rawValue - ZERO_POINT) / FULL_SCALE
+    if (reading.rawValue < PRESSURE_24BIT_MAX/2) {
+        reading.normalizedValue = (float)(reading.rawValue  + 16777216 - PRESSURE_24BIT_MAX) / PRESSURE_FULL_SCALE * 1.26;
+    } else {
+        reading.normalizedValue = (float)(reading.rawValue - PRESSURE_24BIT_MAX) / PRESSURE_FULL_SCALE;
+    }
     
     // Convert to pressure units
     reading.pressureBar = normalizedToBar(reading.normalizedValue);

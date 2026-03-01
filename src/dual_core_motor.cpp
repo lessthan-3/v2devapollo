@@ -10,6 +10,7 @@
 #include "pressure_sensor.h"
 #include "motor_control.h"
 #include "pid_controller.h"
+#include <math.h>
 
 // Global shared data instance
 MotorSharedData motorShared = {
@@ -25,6 +26,7 @@ MotorSharedData motorShared = {
     .motorSpeed = 0,
     .pidOutput = 0.0f,
     .pressureValid = false,
+    .idleSecondsRemaining = UINT32_MAX,
     .loopCount = 0,
     .loopTimeUs = 0,
     .maxLoopTimeUs = 0,
@@ -64,6 +66,21 @@ void motorControlTask(void *parameter) {
     uint32_t loopStartTime;
     float smoothedPressure = 0.0f;
     const float smoothingAlpha = 0.3f;  // EMA smoothing factor
+
+    // Idle / power pause state
+    typedef enum {
+        IDLE_STATE_OFF = 0,
+        IDLE_STATE_PID_RAMP,
+        IDLE_STATE_HOLD
+    } IdleState;
+
+    IdleState idleState = IDLE_STATE_OFF;
+    uint32_t idleCounter = 0;
+    uint32_t idleStableCounter = 0;
+    uint8_t idleHoldSpeed = 0;
+
+    const uint32_t idleEntryLoops = (IDLE_ENTRY_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
+    const uint32_t idleStableLoops = (IDLE_STABLE_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
     
     // Main motor control loop
     while (true) {
@@ -102,9 +119,6 @@ void motorControlTask(void *parameter) {
         bool enabled = motorShared.motorEnabled;
         portEXIT_CRITICAL(&motorShared.mutex);
         
-        // Update PID setpoint
-        motorPid.setpoint = target;
-        
         // Read pressure sensor
         PressureReading reading = pressureSensor.readPressure();
         
@@ -116,31 +130,100 @@ void motorControlTask(void *parameter) {
             smoothedPressure = (smoothingAlpha * reading.pressurePsi) + 
                                ((1.0f - smoothingAlpha) * smoothedPressure);
             
-            // Calculate PID output
-            float pidOut = pidCalculate(&motorPid, smoothedPressure);
-            
-            // Convert PID output (0-100) to motor speed
-            speed = (uint8_t)constrain(pidOut, 0.0f, 100.0f);
-            
-            // Update motor speed
-            setMotorSpeed(speed);
-            //setMotorSpeed(50);  // TESTING - REMOVE
-            
-            // Store results (atomic write)
+            bool inActiveBand = fabsf(smoothedPressure - target) <= IDLE_ENTRY_DEVIATION_PSI;
+            if (idleState == IDLE_STATE_OFF) {
+                if (inActiveBand) {
+                    if (idleCounter < idleEntryLoops) {
+                        idleCounter++;
+                    }
+                } else if (idleCounter > 0) {
+                    if (idleCounter > IDLE_ENTRY_DECREASE) {
+                        idleCounter -= IDLE_ENTRY_DECREASE;
+                    } else {
+                        idleCounter = 0;
+                    }
+                }
+
+                if (idleCounter >= idleEntryLoops && idleEntryLoops > 0) {
+                    idleState = IDLE_STATE_PID_RAMP;
+                    idleCounter = 0;
+                    idleStableCounter = 0;
+                    idleHoldSpeed = 0;
+                    pidReset(&motorPid);
+                }
+            }
+
+            float pidOut = 0.0f;
+
+            uint32_t idleSecondsRemaining = 0;
+            if (idleState == IDLE_STATE_OFF && idleEntryLoops > 0) {
+                uint32_t remainingLoops = (idleCounter < idleEntryLoops) ? (idleEntryLoops - idleCounter) : 0;
+                idleSecondsRemaining = (remainingLoops * MOTOR_LOOP_INTERVAL_US) / 1000000UL;
+            } else if (idleState == IDLE_STATE_OFF && idleEntryLoops == 0) {
+                idleSecondsRemaining = 0;
+            } else {
+                idleSecondsRemaining = 0;
+            }
+
+            if (idleState == IDLE_STATE_PID_RAMP) {
+                motorPid.setpoint = IDLE_TARGET_PSI;
+                pidOut = pidCalculate(&motorPid, smoothedPressure);
+                speed = (uint8_t)constrain(pidOut, 0.0f, 100.0f);
+                setMotorSpeed(speed);
+
+                if (fabsf(smoothedPressure - IDLE_TARGET_PSI) <= IDLE_STABLE_BAND_PSI) {
+                    if (idleStableCounter < idleStableLoops) {
+                        idleStableCounter++;
+                    }
+                } else {
+                    idleStableCounter = 0;
+                }
+
+                if (idleStableCounter >= idleStableLoops && idleStableLoops > 0) {
+                    idleHoldSpeed = speed;
+                    if (idleHoldSpeed < IDLE_MIN_HOLD_SPEED) {
+                        idleHoldSpeed = IDLE_MIN_HOLD_SPEED;
+                    }
+                    idleState = IDLE_STATE_HOLD;
+                    pidReset(&motorPid);
+                }
+            } else if (idleState == IDLE_STATE_HOLD) {
+                setMotorSpeed(idleHoldSpeed);
+                speed = idleHoldSpeed;
+                pidOut = (float)idleHoldSpeed;
+
+                if (smoothedPressure < (IDLE_TARGET_PSI - IDLE_EXIT_DROP_PSI)) {
+                    idleState = IDLE_STATE_OFF;
+                    idleCounter = 0;
+                    idleStableCounter = 0;
+                    pidReset(&motorPid);
+                }
+            } else {
+                motorPid.setpoint = target;
+                pidOut = pidCalculate(&motorPid, smoothedPressure);
+                speed = (uint8_t)constrain(pidOut, 0.0f, 100.0f);
+                setMotorSpeed(speed);
+            }
+
             portENTER_CRITICAL(&motorShared.mutex);
             motorShared.currentPsi = reading.pressurePsi;
             motorShared.smoothedPsi = smoothedPressure;
             motorShared.motorSpeed = speed;
             motorShared.pidOutput = pidOut;
             motorShared.pressureValid = true;
+            motorShared.idleSecondsRemaining = idleSecondsRemaining;
             portEXIT_CRITICAL(&motorShared.mutex);
         } else if (!enabled) {
             // Motor disabled - set speed to 0
             setMotorSpeed(0);
+            idleState = IDLE_STATE_OFF;
+            idleCounter = 0;
+            idleStableCounter = 0;
             
             portENTER_CRITICAL(&motorShared.mutex);
             motorShared.motorSpeed = 0;
             motorShared.pressureValid = valid;
+            motorShared.idleSecondsRemaining = UINT32_MAX;
             if (valid) {
                 motorShared.currentPsi = reading.pressurePsi;
                 motorShared.smoothedPsi = smoothedPressure;
@@ -150,10 +233,14 @@ void motorControlTask(void *parameter) {
             // Sensor error - disable motor for safety
             setMotorSpeed(0);
             pidReset(&motorPid);
+            idleState = IDLE_STATE_OFF;
+            idleCounter = 0;
+            idleStableCounter = 0;
             
             portENTER_CRITICAL(&motorShared.mutex);
             motorShared.motorSpeed = 0;
             motorShared.pressureValid = false;
+            motorShared.idleSecondsRemaining = UINT32_MAX;
             portEXIT_CRITICAL(&motorShared.mutex);
         }
         

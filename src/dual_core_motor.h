@@ -20,6 +20,16 @@
 #define MOTOR_TASK_PRIORITY     2       // Higher priority than display
 #define MOTOR_LOOP_INTERVAL_US  5000    // 5ms loop interval (200Hz)
 
+// Idle / power pause behavior
+#define IDLE_ENTRY_SECONDS          20    // Seconds of stable pressure before idle
+#define IDLE_ENTRY_DEVIATION_PSI    0.3f  // Allowed deviation from target to count as stable
+#define IDLE_ENTRY_DECREASE         2     // Counter decrease rate when outside band
+#define IDLE_TARGET_PSI             2.5f  // Idle pressure target
+#define IDLE_STABLE_SECONDS         2     // Seconds at idle target before holding speed
+#define IDLE_STABLE_BAND_PSI        0.15f // Allowed deviation at idle target for stability
+#define IDLE_EXIT_DROP_PSI          0.3f  // Pressure drop below idle target to exit
+#define IDLE_MIN_HOLD_SPEED         5     // Minimum motor speed to hold in idle
+
 // Shared data structure (thread-safe access)
 typedef struct {
     // Inputs (written by display task, read by motor task)
@@ -37,6 +47,7 @@ typedef struct {
     volatile uint8_t motorSpeed;        // Current motor speed 0-100%
     volatile float pidOutput;           // Raw PID output
     volatile bool pressureValid;        // Pressure sensor status
+    volatile uint32_t idleSecondsRemaining; // Seconds until power pause activates
     volatile uint32_t loopCount;        // Motor loop iteration count
     volatile uint32_t loopTimeUs;       // Actual loop time in microseconds
     volatile uint32_t maxLoopTimeUs;    // Maximum loop time observed

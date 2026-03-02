@@ -4,6 +4,7 @@
  */
 
 #include "motor_control.h"
+#include <math.h>
 
 // Global motor control state
 MotorControlState motorState = {
@@ -27,6 +28,15 @@ static hw_timer_t *zcSimTimer = NULL;
 // Debug reporting variables
 static unsigned long lastDebugReport = 0;
 static uint32_t lastReportedCount = 0;
+
+#ifdef TRIAC_DEBUG_SERIAL
+static volatile uint32_t triacFireCount = 0;
+static volatile uint32_t triacTimerArmCount = 0;
+static volatile uint32_t triacTimerSkipCount = 0;
+static uint32_t lastReportedTriacFireCount = 0;
+static uint32_t lastReportedTriacArmCount = 0;
+static uint32_t lastReportedTriacSkipCount = 0;
+#endif
 
 // Frequency detection variables
 static volatile uint32_t zcTimestamps[3] = {0, 0, 0};
@@ -57,6 +67,13 @@ void IRAM_ATTR zeroCrossingISR() {
             timerWrite(triacTimer, 0);
             timerAlarmWrite(triacTimer, motorState.motorPwm, false);
             timerAlarmEnable(triacTimer);
+#ifdef TRIAC_DEBUG_SERIAL
+            triacTimerArmCount++;
+#endif
+        } else {
+#ifdef TRIAC_DEBUG_SERIAL
+            triacTimerSkipCount++;
+#endif
         }
     }
 }
@@ -67,10 +84,17 @@ void IRAM_ATTR zeroCrossingISR() {
  * Called when delay timer expires - time to fire the triac
  */
 void IRAM_ATTR triacTimerISR() {
+    // if (!motorState.motorEnabled || motorState.motorSpeed == 0) {
+    //     timerAlarmDisable(triacTimer);
+    //     return;
+    // }
     // Fire the triac with a short pulse
     digitalWrite(TRIAC_GATE_PIN, HIGH);
     delayMicroseconds(TRIAC_PULSE_US);
     digitalWrite(TRIAC_GATE_PIN, LOW);
+#ifdef TRIAC_DEBUG_SERIAL
+    triacFireCount++;
+#endif
     
     // Disable the alarm until next zero crossing
     timerAlarmDisable(triacTimer);
@@ -178,6 +202,8 @@ void enableMotor(bool enable) {
         if (triacTimer != NULL) {
             timerStop(triacTimer);
         }
+    } else if (triacTimer != NULL) {
+        timerStart(triacTimer);
     }
     
     Serial.printf("Motor Control: Motor %s\n", enable ? "ENABLED" : "DISABLED");
@@ -271,6 +297,20 @@ void motorControlDebugReport() {
                       motorState.motorSpeed, motorState.motorPwm);
         Serial.printf("  Motor Enabled: %s, Max Delay: %u us\n",
                       motorState.motorEnabled ? "YES" : "NO", motorState.maxDelay);
+    #ifdef TRIAC_DEBUG_SERIAL
+        uint32_t fireCount = triacFireCount;
+        uint32_t armCount = triacTimerArmCount;
+        uint32_t skipCount = triacTimerSkipCount;
+        Serial.printf("  Triac Fires: %lu (total), +%lu\n",
+                  fireCount, fireCount - lastReportedTriacFireCount);
+        Serial.printf("  Triac Arms: %lu (total), +%lu\n",
+                  armCount, armCount - lastReportedTriacArmCount);
+        Serial.printf("  Triac Skips: %lu (total), +%lu\n",
+                  skipCount, skipCount - lastReportedTriacSkipCount);
+        lastReportedTriacFireCount = fireCount;
+        lastReportedTriacArmCount = armCount;
+        lastReportedTriacSkipCount = skipCount;
+    #endif
         Serial.println("---------------------------");
         
         lastReportedCount = currentCount;
@@ -308,12 +348,14 @@ uint8_t updateMotorFromPid(float currentPressurePsi) {
         return 0;
     }
     
-    // Calculate PID output (motor speed 0-100)
-    float pidOutput = pidCalculate(&pressurePid, currentPressurePsi);
-    
-    // Convert to integer speed
-    uint8_t speed = (uint8_t)(pidOutput + 0.5f);
-    
+    // Calculate PID output (motor speed adjustment)
+    float pidAdjustment = pidCalculate(&pressurePid, currentPressurePsi);
+
+    // Apply adjustment to current speed and clamp to 20-100
+    int targetSpeed = (int)motorState.motorSpeed + (int)lroundf(pidAdjustment);
+    targetSpeed = constrain(targetSpeed, 20, 100);
+    uint8_t speed = (uint8_t)targetSpeed;
+
     // Set motor speed
     setMotorSpeed(speed);
     

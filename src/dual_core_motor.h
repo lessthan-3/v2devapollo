@@ -23,7 +23,7 @@
 // Idle / power pause behavior
 #define IDLE_ENTRY_SECONDS          20    // Seconds of stable pressure before idle
 #define IDLE_ENTRY_DEVIATION_PSI    0.3f  // Allowed deviation from target to count as stable
-#define IDLE_ENTRY_DECREASE         2     // Counter decrease rate when outside band
+#define IDLE_ENTRY_DECREASE         50     // Counter decrease rate when outside band
 #define IDLE_TARGET_PSI             2.5f  // Idle pressure target
 #define IDLE_STABLE_SECONDS         2     // Seconds at idle target before holding speed
 #define IDLE_STABLE_BAND_PSI        0.15f // Allowed deviation at idle target for stability
@@ -40,6 +40,7 @@ typedef struct {
     volatile float pidKp;               // PID proportional gain
     volatile float pidKi;               // PID integral gain
     volatile float pidKd;               // PID derivative gain
+    volatile float idleEntryDeviationPsi; // Allowed deviation from target to count as stable
     
     // Outputs (written by motor task, read by display task)
     volatile float currentPsi;          // Current pressure reading
@@ -119,5 +120,20 @@ void setPidGainsSafe(float kp, float ki, float kd);
  * @param kd Pointer to store Kd value
  */
 void getPidGainsSafe(float *kp, float *ki, float *kd);
+
+void setIdleEntryDeviationSafe(float deviationPsi);
+float getIdleEntryDeviationSafe(void);
+
+/**
+ * @brief Set idle entry deviation band (thread-safe)
+ * @param deviationPsi Allowed deviation from target to count as stable
+ */
+void setIdleEntryDeviationSafe(float deviationPsi);
+
+/**
+ * @brief Get idle entry deviation band (thread-safe)
+ * @return Allowed deviation from target to count as stable
+ */
+float getIdleEntryDeviationSafe(void);
 
 #endif // DUAL_CORE_MOTOR_H

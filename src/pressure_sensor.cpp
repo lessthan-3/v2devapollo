@@ -98,18 +98,25 @@ bool PressureSensor::begin() {
     // Give I2C bus time to stabilize
     delay(50);
     uint8_t error = 1;
+    uint32_t scanStart = millis();
     
-    // Scan for the device on the I2C bus
-    while (error != 0) {
+    // Scan for the device on the I2C bus (with timeout)
+    while (error != 0 && (millis() - scanStart) < 500) {
         Wire.beginTransmission(PRESSURE_I2C_ADDR);
         // pinMode(PRESSURE_SDA_PIN, INPUT);
         // pinMode(PRESSURE_SCL_PIN, INPUT);
         // delay(50); // Removed delay between begin and end transmission
-        uint8_t error = Wire.endTransmission();
+        error = Wire.endTransmission();
         if (error == 0) {
-                break;  // Device found
-            }
+            break;  // Device found
+        }
         delay(100);
+    }
+
+    if (error != 0) {
+        lastError = PRESSURE_ERR_I2C_BEGIN;
+        Serial.println("Pressure sensor: I2C scan timeout");
+        return false;
     }
         
     // Serial.printf("DEBUG: Wire.endTransmission() returned %d at address 0x%02X\n", error, PRESSURE_I2C_ADDR);

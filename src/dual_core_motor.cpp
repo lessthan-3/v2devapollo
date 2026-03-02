@@ -21,6 +21,7 @@ MotorSharedData motorShared = {
     .pidKp = PID_KP_DEFAULT,
     .pidKi = PID_KI_DEFAULT,
     .pidKd = PID_KD_DEFAULT,
+    .idleEntryDeviationPsi = IDLE_ENTRY_DEVIATION_PSI,
     .currentPsi = 0.0f,
     .smoothedPsi = 0.0f,
     .motorSpeed = 0,
@@ -38,6 +39,19 @@ static TaskHandle_t motorTaskHandle = NULL;
 
 // Local PID controller for motor task
 static PidController motorPid;
+
+static uint8_t calculateMaxSpeedFromTarget(float targetPsi) {
+    if (targetPsi <= 3.0f) {
+        return 50;
+    }
+    if (targetPsi >= 6.0f) {
+        return 100;
+    }
+
+    float normalized = (targetPsi - 3.0f) / 3.0f;
+    float maxSpeed = 50.0f + (normalized * 50.0f);
+    return (uint8_t)lroundf(maxSpeed);
+}
 
 /**
  * @brief Motor control task - runs on Core 0
@@ -65,7 +79,8 @@ void motorControlTask(void *parameter) {
     uint32_t lastLoopTime = micros();
     uint32_t loopStartTime;
     float smoothedPressure = 0.0f;
-    const float smoothingAlpha = 0.3f;  // EMA smoothing factor
+    const float smoothingAlpha = 1.0f;  // EMA smoothing factor
+    uint8_t lastSpeed = 0;
 
     // Idle / power pause state
     typedef enum {
@@ -114,9 +129,11 @@ void motorControlTask(void *parameter) {
         }
         
         // Get target pressure (atomic read)
+        float idleEntryDeviation = IDLE_ENTRY_DEVIATION_PSI;
         portENTER_CRITICAL(&motorShared.mutex);
         float target = motorShared.targetPsi;
         bool enabled = motorShared.motorEnabled;
+        idleEntryDeviation = motorShared.idleEntryDeviationPsi;
         portEXIT_CRITICAL(&motorShared.mutex);
         
         // Read pressure sensor
@@ -130,7 +147,7 @@ void motorControlTask(void *parameter) {
             smoothedPressure = (smoothingAlpha * reading.pressurePsi) + 
                                ((1.0f - smoothingAlpha) * smoothedPressure);
             
-            bool inActiveBand = fabsf(smoothedPressure - target) <= IDLE_ENTRY_DEVIATION_PSI;
+            bool inActiveBand = fabsf(smoothedPressure - target) <= idleEntryDeviation;
             if (idleState == IDLE_STATE_OFF) {
                 if (inActiveBand) {
                     if (idleCounter < idleEntryLoops) {
@@ -168,8 +185,11 @@ void motorControlTask(void *parameter) {
             if (idleState == IDLE_STATE_PID_RAMP) {
                 motorPid.setpoint = IDLE_TARGET_PSI;
                 pidOut = pidCalculate(&motorPid, smoothedPressure);
-                speed = (uint8_t)constrain(pidOut, 0.0f, 100.0f);
+                int adjustedSpeed = (int)lastSpeed + (int)lroundf(pidOut);
+                adjustedSpeed = constrain(adjustedSpeed, 20, 100);
+                speed = (uint8_t)adjustedSpeed;
                 setMotorSpeed(speed);
+                lastSpeed = speed;
 
                 if (fabsf(smoothedPressure - IDLE_TARGET_PSI) <= IDLE_STABLE_BAND_PSI) {
                     if (idleStableCounter < idleStableLoops) {
@@ -191,6 +211,7 @@ void motorControlTask(void *parameter) {
                 setMotorSpeed(idleHoldSpeed);
                 speed = idleHoldSpeed;
                 pidOut = (float)idleHoldSpeed;
+                lastSpeed = speed;
 
                 if (smoothedPressure < (IDLE_TARGET_PSI - IDLE_EXIT_DROP_PSI)) {
                     idleState = IDLE_STATE_OFF;
@@ -201,8 +222,12 @@ void motorControlTask(void *parameter) {
             } else {
                 motorPid.setpoint = target;
                 pidOut = pidCalculate(&motorPid, smoothedPressure);
-                speed = (uint8_t)constrain(pidOut, 0.0f, 100.0f);
+                int adjustedSpeed = (int)lastSpeed + (int)lroundf(pidOut);
+                uint8_t maxSpeed = calculateMaxSpeedFromTarget(target);
+                adjustedSpeed = constrain(adjustedSpeed, 20, maxSpeed);
+                speed = (uint8_t)adjustedSpeed;
                 setMotorSpeed(speed);
+                lastSpeed = speed;
             }
 
             portENTER_CRITICAL(&motorShared.mutex);
@@ -216,6 +241,7 @@ void motorControlTask(void *parameter) {
         } else if (!enabled) {
             // Motor disabled - set speed to 0
             setMotorSpeed(0);
+            lastSpeed = 0;
             idleState = IDLE_STATE_OFF;
             idleCounter = 0;
             idleStableCounter = 0;
@@ -232,6 +258,7 @@ void motorControlTask(void *parameter) {
         } else {
             // Sensor error - disable motor for safety
             setMotorSpeed(0);
+            lastSpeed = 0;
             pidReset(&motorPid);
             idleState = IDLE_STATE_OFF;
             idleCounter = 0;
@@ -350,4 +377,18 @@ void getPidGainsSafe(float *kp, float *ki, float *kd) {
     *ki = motorShared.pidKi;
     *kd = motorShared.pidKd;
     portEXIT_CRITICAL(&motorShared.mutex);
+}
+
+void setIdleEntryDeviationSafe(float deviationPsi) {
+    portENTER_CRITICAL(&motorShared.mutex);
+    motorShared.idleEntryDeviationPsi = deviationPsi;
+    portEXIT_CRITICAL(&motorShared.mutex);
+}
+
+float getIdleEntryDeviationSafe(void) {
+    float deviationPsi;
+    portENTER_CRITICAL(&motorShared.mutex);
+    deviationPsi = motorShared.idleEntryDeviationPsi;
+    portEXIT_CRITICAL(&motorShared.mutex);
+    return deviationPsi;
 }

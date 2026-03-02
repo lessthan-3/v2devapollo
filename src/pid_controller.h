@@ -18,17 +18,17 @@
 // ============================================================================
 // PID Controller Default Constants
 // ============================================================================
-#define PID_KP_DEFAULT      50.0f   // Default proportional gain (aggressive response)
-#define PID_KI_DEFAULT      20.0f    // Default integral gain
-#define PID_KD_DEFAULT      20.0f    // Default derivative gain
+#define PID_KP_DEFAULT      4.0f    // Default proportional gain (reduced)
+#define PID_KI_DEFAULT      2.0f    // Default integral gain (reduced)
+#define PID_KD_DEFAULT      2.0f    // Default derivative gain (reduced)
 
 // PID Output Limits
-#define PID_OUTPUT_MIN      30.0f   // Minimum PID output (motor speed %)
-#define PID_OUTPUT_MAX      100.0f  // Maximum PID output (motor speed %)
+#define PID_OUTPUT_MIN      -100.0f // Minimum PID output (motor speed adjustment)
+#define PID_OUTPUT_MAX      100.0f  // Maximum PID output (motor speed adjustment)
 #define PID_INTEGRAL_MAX    500.0f  // Anti-windup limit for integral term
 
 // Gain limits
-#define PID_KP_MIN          1.0f
+#define PID_KP_MIN          0.25f
 #define PID_KP_MAX          100.0f
 #define PID_KI_MIN          0.0f
 #define PID_KI_MAX          100.0f
@@ -59,7 +59,7 @@ typedef struct {
     float setpoint;                 // Target value (pressure in PSI)
     float integral;                 // Accumulated integral term
     float prevError;                // Previous error for derivative
-    float prevOutput;               // Previous output for rate limiting
+    float prevOutput;               // Previous output adjustment for rate limiting
     
     // Output limits
     float outputMin;
@@ -109,7 +109,7 @@ void pidReset(PidController *pid);
  * 
  * @param pid Pointer to PID controller structure
  * @param currentValue Current measured value (pressure in PSI)
- * @return PID output (motor speed 0-100%)
+ * @return PID output (motor speed adjustment)
  */
 float pidCalculate(PidController *pid, float currentValue);
 

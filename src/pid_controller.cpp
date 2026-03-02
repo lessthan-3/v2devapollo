@@ -80,8 +80,10 @@ float pidCalculate(PidController *pid, float currentValue) {
     
     // Apply deadband for stability
     if (fabsf(error) < pid->deadband) {
-        // Within deadband - maintain previous output
-        return pid->prevOutput;
+        // Within deadband - no adjustment
+        pid->prevError = error;
+        pid->prevOutput = 0.0f;
+        return 0.0f;
     }
     
     // Calculate proportional term
@@ -115,8 +117,8 @@ float pidCalculate(PidController *pid, float currentValue) {
     // Store error for next derivative calculation
     pid->prevError = error;
     
-    // Calculate raw output with base offset to ensure minimum motor speed
-    float output = proportional + integral + derivative + 30.0f;
+    // Calculate raw output as an adjustment to motor speed
+    float output = proportional + integral + derivative;
     
     // Apply output limits
     output = constrainFloat(output, pid->outputMin, pid->outputMax);
@@ -232,7 +234,7 @@ void pidSetGains(PidController *pid, float kp, float ki, float kd) {
 
 void pidDebugPrint(PidController *pid) {
     Serial.println("--- PID Controller Status ---");
-    Serial.printf("  Setpoint: %.2f, Output: %.2f\n", pid->setpoint, pid->prevOutput);
+    Serial.printf("  Setpoint: %.2f, Adjustment: %.2f\n", pid->setpoint, pid->prevOutput);
     Serial.printf("  Gains: Kp=%.1f, Ki=%.1f, Kd=%.1f\n", pid->kp, pid->ki, pid->kd);
     Serial.printf("  Integral: %.3f, Prev Error: %.3f\n", pid->integral, pid->prevError);
     Serial.printf("  Stored in NVS: %s\n", pid->hasStoredParams ? "YES" : "NO");

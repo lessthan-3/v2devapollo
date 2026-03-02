@@ -34,6 +34,10 @@
 // Debug reporting interval
 #define DEBUG_REPORT_INTERVAL_MS  3000  // Report ZC count every 3 seconds
 
+// Enable serial triac diagnostics (safe, non-ISR printing)
+// Add -DTRIAC_DEBUG_SERIAL to build_flags to enable
+// #define TRIAC_DEBUG_SERIAL
+
 /**
  * @brief AC frequency enum
  */

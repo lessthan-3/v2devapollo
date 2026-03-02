@@ -12,6 +12,7 @@ extern uint32_t sessionStartMillis;
 extern uint32_t totalRuntimeTenths;
 extern unsigned long pidLoopIntervalMs;
 extern float currentTemperatureC;
+extern bool overTempActive;
 
 void drawStaticUI() {
   tft.drawFastHLine(0, STATUS_ZONE_Y - 5, SCREEN_WIDTH, TFT_DARKGREY);
@@ -128,11 +129,13 @@ void drawTemperature(float tempC) {
 
   tft.fillRect(LEFT_COLUMN_X, STATUS_ZONE_Y + 18, 65, 30, COLOR_BG);
 
-  tft.setTextColor(COLOR_TEMP, COLOR_BG);
+  tft.setTextColor(overTempActive ? TFT_RED : COLOR_TEMP, COLOR_BG);
   tft.setTextSize(2);
   tft.setCursor(LEFT_COLUMN_X, STATUS_ZONE_Y + 22);
 
-  if (tempC < -100.0f) {
+  if (overTempActive) {
+    tft.print("HOT");
+  } else if (tempC < -100.0f) {
     tft.print("--");
   } else {
     float tempF = (tempC * 9.0f / 5.0f) + 32.0f;
@@ -313,6 +316,16 @@ void drawMenuFooter(const char* message, uint16_t color) {
   }
 }
 
+void drawSettingsFooter(const char* message, uint16_t color) {
+  tft.fillRect(0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 40, COLOR_BG);
+  if (message != NULL && message[0] != '\0') {
+    tft.setTextColor(color, COLOR_BG);
+    tft.setTextSize(2);
+    tft.setCursor(20, SCREEN_HEIGHT - 30);
+    tft.print(message);
+  }
+}
+
 void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   static uint8_t lastMenuIndex = 255;
   if (!forceRedraw && lastMenuIndex == menuIndex) {
@@ -343,6 +356,72 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   drawMenuFooter("Press to select", TFT_GREEN);
 }
 
+void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, bool editing, bool forceRedraw) {
+  static uint8_t lastIndex = 255;
+  static float lastKp = -1.0f;
+  static float lastKi = -1.0f;
+  static float lastKd = -1.0f;
+  static float lastIdleDev = -1.0f;
+  static bool lastEditing = false;
+
+  if (!forceRedraw && lastIndex == settingsIndex && lastEditing == editing &&
+      fabsf(kp - lastKp) < 0.01f && fabsf(ki - lastKi) < 0.01f && fabsf(kd - lastKd) < 0.01f &&
+      fabsf(idleDev - lastIdleDev) < 0.01f) {
+    return;
+  }
+
+  lastIndex = settingsIndex;
+  lastEditing = editing;
+  lastKp = kp;
+  lastKi = ki;
+  lastKd = kd;
+  lastIdleDev = idleDev;
+
+  tft.fillScreen(COLOR_BG);
+  tft.setTextColor(TFT_WHITE, COLOR_BG);
+  tft.setTextSize(3);
+  tft.setCursor(150, 20);
+  tft.print("SETTINGS");
+
+  for (uint8_t i = 0; i < SETTINGS_OPTION_COUNT; i++) {
+    bool selected = (i == settingsIndex);
+    drawSettingsRow(i, kp, ki, kd, idleDev, selected, editing);
+  }
+
+  if (editing) {
+    drawSettingsFooter("Rotate to adjust, press to exit", TFT_YELLOW);
+  } else {
+    drawSettingsFooter("Press to edit / select", TFT_GREEN);
+  }
+}
+
+void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, bool selected, bool editing) {
+  const char* options[SETTINGS_OPTION_COUNT] = {"Kp", "Ki", "Kd", "Idle dev", "Save", "Back"};
+  int y = SETTINGS_TOP_Y + (settingsIndex * SETTINGS_OPTION_HEIGHT);
+  uint16_t bg = COLOR_BG;
+  uint16_t fg = TFT_WHITE;
+  if (selected) {
+    bg = editing ? TFT_YELLOW : TFT_DARKGREY;
+    fg = TFT_BLACK;
+  }
+
+  tft.fillRect(40, y - 5, SCREEN_WIDTH - 80, SETTINGS_OPTION_HEIGHT, bg);
+  tft.setTextColor(fg, bg);
+  tft.setTextSize(2);
+  tft.setCursor(60, y);
+  tft.print(options[settingsIndex]);
+
+  if (settingsIndex <= 3) {
+    float value = 0.0f;
+    if (settingsIndex == 0) value = kp;
+    if (settingsIndex == 1) value = ki;
+    if (settingsIndex == 2) value = kd;
+    if (settingsIndex == 3) value = idleDev;
+    tft.setCursor(SCREEN_WIDTH - 140, y);
+    tft.printf("%5.2f", value);
+  }
+}
+
 void drawRuntimeStatic() {
   tft.fillScreen(COLOR_BG);
 
@@ -351,9 +430,11 @@ void drawRuntimeStatic() {
   tft.drawFastHLine(0, CELL_HEIGHT, SCREEN_WIDTH, TFT_DARKGREY);
   tft.drawFastHLine(0, RUNTIME_FOOTER_Y, SCREEN_WIDTH, TFT_DARKGREY);
 
+  tft.fillRect(0, 0, 180, 40, TFT_BLACK);
+
   tft.setTextColor(TFT_WHITE, COLOR_BG);
   tft.setTextSize(2);
-  tft.setCursor(10, 10);
+  tft.setCursor(100, 10);
   tft.print("TARGET PSI");
 
   tft.setTextSize(2);
@@ -362,9 +443,13 @@ void drawRuntimeStatic() {
 
   tft.setCursor(RUNTIME_RIGHT_X + 10, CELL_HEIGHT + 10);
   tft.print("PAUSE IN");
+
+  tft.setTextSize(2);
+  tft.setCursor(RUNTIME_RIGHT_X + 10, RUNTIME_FOOTER_Y + 10);
+  tft.print("MOTOR");
 }
 
-void drawRuntimeTarget(float target, float current, bool valid) {
+void drawRuntimeTarget(float target, float current, bool valid, bool forceRedraw) {
   static float lastTarget = -999.0f;
   static float lastCurrent = -999.0f;
   static bool lastValid = false;
@@ -379,12 +464,12 @@ void drawRuntimeTarget(float target, float current, bool valid) {
       color = TFT_RED;
     } else if (diff > 0.5f) {
       color = TFT_ORANGE;
-    } else if (diff <= 0.1f) {
+    } else if (diff <= 0.3f) {
       color = TFT_GREEN;
     }
   }
 
-  if (fabsf(target - lastTarget) < 0.05f && fabsf(current - lastCurrent) < 0.05f && valid == lastValid && color == lastColor) {
+  if (!forceRedraw && fabsf(target - lastTarget) < 0.05f && fabsf(current - lastCurrent) < 0.05f && valid == lastValid && color == lastColor) {
     return;
   }
 
@@ -411,20 +496,22 @@ void drawRuntimeTarget(float target, float current, bool valid) {
   tft.print("PSI");
 }
 
-void drawRuntimeTemperature(float tempC) {
+void drawRuntimeTemperature(float tempC, bool forceRedraw) {
   static float lastTemp = -999.0f;
-  if (fabsf(tempC - lastTemp) < 0.5f && lastTemp != -999.0f) {
+  if (!forceRedraw && fabsf(tempC - lastTemp) < 0.5f && lastTemp != -999.0f) {
     return;
   }
   lastTemp = tempC;
 
   tft.fillRect(RUNTIME_RIGHT_X + 2, 30, CELL_WIDTH - 4, CELL_HEIGHT - 32, COLOR_BG);
 
-  tft.setTextColor(COLOR_TEMP, COLOR_BG);
+  tft.setTextColor(overTempActive ? TFT_RED : COLOR_TEMP, COLOR_BG);
   tft.setTextSize(3);
   tft.setCursor(RUNTIME_RIGHT_X + 20, 50);
 
-  if (tempC < -100.0f) {
+  if (overTempActive) {
+    tft.print("HOT");
+  } else if (tempC < -100.0f) {
     tft.print("--");
   } else {
     float tempF = (tempC * 9.0f / 5.0f) + 32.0f;
@@ -436,9 +523,9 @@ void drawRuntimeTemperature(float tempC) {
   tft.print("F");
 }
 
-void drawRuntimePauseCountdown(uint32_t secondsRemaining) {
+void drawRuntimePauseCountdown(uint32_t secondsRemaining, bool forceRedraw) {
   static uint32_t lastSeconds = 0xFFFFFFFF;
-  if (secondsRemaining == lastSeconds) {
+  if (!forceRedraw && secondsRemaining == lastSeconds) {
     return;
   }
   lastSeconds = secondsRemaining;
@@ -460,9 +547,25 @@ void drawRuntimePauseCountdown(uint32_t secondsRemaining) {
 }
 
 void drawRuntimeFooter() {
-  tft.fillRect(0, RUNTIME_FOOTER_Y + 2, SCREEN_WIDTH, CELL_HEIGHT - 4, COLOR_BG);
+  tft.fillRect(0, RUNTIME_FOOTER_Y + 2, RUNTIME_FOOTER_WIDTH, CELL_HEIGHT - 4, COLOR_BG);
   tft.setTextColor(TFT_WHITE, COLOR_BG);
   tft.setTextSize(2);
-  tft.setCursor(20, RUNTIME_FOOTER_Y + 35);
-  tft.print("PRESS TO PAUSE AND SWAP TO MENU");
+  tft.setCursor(10, RUNTIME_FOOTER_Y + 35);
+  tft.print("PRESS TO PAUSE / MENU");
+}
+
+void drawRuntimeMotorPower(uint8_t motorSpeed, bool forceRedraw) {
+  static uint8_t lastMotorSpeed = 255;
+  if (!forceRedraw && motorSpeed == lastMotorSpeed) {
+    return;
+  }
+  lastMotorSpeed = motorSpeed;
+
+  tft.fillRect(RUNTIME_RIGHT_X + 2, RUNTIME_FOOTER_Y + 30, CELL_WIDTH - 4, CELL_HEIGHT - 32, COLOR_BG);
+  tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
+  tft.setTextSize(4);
+  tft.setCursor(RUNTIME_RIGHT_X + 20, RUNTIME_FOOTER_Y + 45);
+  tft.printf("%3u", motorSpeed);
+  tft.setTextSize(2);
+  tft.print("%");
 }

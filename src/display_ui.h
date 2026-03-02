@@ -24,11 +24,17 @@ extern TFT_eSPI tft;
 #define RUNTIME_TOP_HEIGHT  (CELL_HEIGHT * 2)
 #define RUNTIME_RIGHT_X     (CELL_WIDTH * 2)
 #define RUNTIME_FOOTER_Y    (CELL_HEIGHT * 2)
+#define RUNTIME_FOOTER_WIDTH (CELL_WIDTH * 2)
 
 // Menu
 #define MENU_OPTION_COUNT   3
 #define MENU_OPTION_HEIGHT  40
 #define MENU_TOP_Y          90
+
+// Settings
+#define SETTINGS_OPTION_COUNT 6
+#define SETTINGS_OPTION_HEIGHT 36
+#define SETTINGS_TOP_Y      70
 
 #define MINMAX_FLASH_MS     500
 
@@ -62,10 +68,14 @@ void updateMinMaxFlash();
 void drawStartupScreen();
 void drawMenuScreen(uint8_t menuIndex, bool forceRedraw = false);
 void drawMenuFooter(const char* message, uint16_t color);
+void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, bool editing, bool forceRedraw = false);
+void drawSettingsFooter(const char* message, uint16_t color);
+void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, bool selected, bool editing);
 void drawRuntimeStatic();
-void drawRuntimeTarget(float target, float current, bool valid);
-void drawRuntimeTemperature(float tempC);
-void drawRuntimePauseCountdown(uint32_t secondsRemaining);
+void drawRuntimeTarget(float target, float current, bool valid, bool forceRedraw = false);
+void drawRuntimeTemperature(float tempC, bool forceRedraw = false);
+void drawRuntimePauseCountdown(uint32_t secondsRemaining, bool forceRedraw = false);
 void drawRuntimeFooter();
+void drawRuntimeMotorPower(uint8_t motorSpeed, bool forceRedraw = false);
 
 #endif

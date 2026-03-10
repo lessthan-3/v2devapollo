@@ -42,7 +42,9 @@
 // Pressure calculation constants
 #define PRESSURE_ZERO_POINT     8388608   // 2^23 - zero condition
 #define PRESSURE_FULL_SCALE     8388608.0f // Divisor for normalization
-#define PRESSURE_24BIT_MAX      15977468  // 2^24 or the number found from testing
+#define PRESSURE_24BIT_MAX      16777216  // 2^24 or the number found from testing
+#define PRESSURE_23BIT_MAX      8388608   // 2^23 or the number found from testing
+
 
 #define PRESSURE_BAR_TO_PSI    14.5038f  // Conversion factor from Bar to PSI
 #define PRESSURE_MULTI        2 //multiplier for unit
@@ -50,7 +52,7 @@
 // Sensor range: 2BG = 2 Bar Gauge
 // 2 Bar = ~29.0075 PSI
 #define PRESSURE_RANGE_BAR      2.0f
-#define PRESSURE_RANGE_PSI      29.0075f
+#define PRESSURE_RANGE_PSI      73.5f
 
 // Conversion timeout
 #define CONVERSION_TIMEOUT_MS   100
@@ -174,6 +176,8 @@ private:
     bool initialized;
     uint8_t lastError;
     bool continuousMode;
+    int32_t zeroPointRaw;
+    int32_t pressure24bitMax;
 
     /**
      * @brief Write a command to the sensor
@@ -199,6 +203,12 @@ private:
      * @return true if successful
      */
     bool readRegisters(uint8_t startReg, uint8_t* buffer, uint8_t length);
+
+    /**
+     * @brief Calibrate zero point at startup (pressure expected to be zero)
+     * @return true if calibration successful
+     */
+    bool calibrateZeroPoint();
 };
 
 // Global pressure sensor instance

@@ -9,11 +9,11 @@
 #include <stdint.h>
 
 // Temperature sensor pin
-#define TEMP_SENSOR_PIN 38  // IO38 - Temperature Sensor (1-Wire treated as ADC)
+#define TEMP_SENSOR_PIN 3  // IO38 - Temperature Sensor (1-Wire treated as ADC)
 
 // Temperature conversion constants
 #define TEMP_MULT    -87
-#define TEMP_DIVISOR 100
+#define TEMP_DIVISOR 200
 #define TEMP_OFFSET  210
 
 #ifdef __cplusplus

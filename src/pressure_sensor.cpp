@@ -12,7 +12,9 @@ PressureSensor pressureSensor;
 PressureSensor::PressureSensor() 
     : initialized(false)
     , lastError(PRESSURE_OK)
-    , continuousMode(false) {
+    , continuousMode(false)
+    , zeroPointRaw(PRESSURE_ZERO_POINT)
+    , pressure24bitMax(PRESSURE_24BIT_MAX) {
 }
 
 bool PressureSensor::begin() {
@@ -137,7 +139,14 @@ bool PressureSensor::begin() {
     initialized = true;
     continuousMode = false;
     lastError = PRESSURE_OK;
-    
+
+    if (!calibrateZeroPoint()) {
+        Serial.println("Pressure sensor: Zero calibration failed, using defaults");
+    } else {
+        Serial.printf("Pressure sensor: Zero calibration raw=%ld, max=%ld\n",
+                      (long)zeroPointRaw, (long)pressure24bitMax);
+    }
+
     Serial.println("Pressure sensor: Initialized successfully");
     return true;
 }
@@ -292,11 +301,20 @@ PressureReading PressureSensor::readPressureData() {
     // - Values above 8388608 are above zero pressure
     // 
     // normalized = (rawValue - ZERO_POINT) / FULL_SCALE
-    if (reading.rawValue < PRESSURE_24BIT_MAX/2) {
-        reading.normalizedValue = (float)(reading.rawValue  + 16777216 - PRESSURE_24BIT_MAX) / PRESSURE_FULL_SCALE * 1.26;
-    } else {
-        reading.normalizedValue = (float)(reading.rawValue - PRESSURE_24BIT_MAX) / PRESSURE_FULL_SCALE;
+    int32_t fullScale = pressure24bitMax > 0 ? pressure24bitMax : PRESSURE_24BIT_MAX;
+    // if (reading.rawValue < PRESSURE_24BIT_MAX/2) {
+    //     reading.normalizedValue = (float)(reading.rawValue - zeroPointRaw) / (fullScale) * 1.26f;
+    // } else {
+    //     reading.normalizedValue = (float)-(zeroPointRaw - reading.rawValue) / (fullScale) * 1.26f;
+    // }
+
+    //from zero point to rollover point 
+    if (reading.rawValue >= zeroPointRaw-PRESSURE_23BIT_MAX) {
+        reading.normalizedValue = (float)(reading.rawValue - zeroPointRaw) / (PRESSURE_24BIT_MAX);
+    } else { //rolled over starting from zero 
+        reading.normalizedValue = (float)(reading.rawValue  + PRESSURE_24BIT_MAX - zeroPointRaw) / (PRESSURE_24BIT_MAX);
     }
+
     
     // Convert to pressure units
     reading.pressureBar = normalizedToBar(reading.normalizedValue);
@@ -362,5 +380,39 @@ bool PressureSensor::stopContinuousMode() {
     // To stop continuous mode, we need to reinitialize the sensor
     // For now, just clear the flag - a full reset would require power cycling
     continuousMode = false;
+    return true;
+}
+
+bool PressureSensor::calibrateZeroPoint() {
+    if (!initialized) {
+        lastError = PRESSURE_ERR_NOT_INITIALIZED;
+        return false;
+    }
+
+    if (!writeRegister(REG_CMD, CMD_SINGLE_OUTPUT)) {
+        return false;
+    }
+
+    uint32_t startTime = millis();
+    while (!isDataReady()) {
+        if (millis() - startTime > CONVERSION_TIMEOUT_MS) {
+            lastError = PRESSURE_ERR_TIMEOUT;
+            return false;
+        }
+        delay(1);
+    }
+
+    uint8_t buffer[3];
+    if (!readRegisters(REG_PRESSURE_MSB, buffer, 3)) {
+        return false;
+    }
+
+    int32_t raw = convertRawToSigned(buffer[0], buffer[1], buffer[2]);
+    if (raw <= 0) {
+        return false;
+    }
+
+    zeroPointRaw = raw;
+    pressure24bitMax = raw * 2;
     return true;
 }

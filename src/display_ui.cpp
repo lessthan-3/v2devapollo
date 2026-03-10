@@ -148,13 +148,13 @@ void drawTemperature(float tempC) {
 }
 
 void drawDebugInfo() {
-  static uint8_t lastMotorSpeed = 255;
+  static uint16_t lastMotorSpeed = 0xFFFF;
   static AcFrequency lastAcFreq = AC_FREQ_UNKNOWN;
   static unsigned long lastLoopTime = 9999;
   static float lastKp = -1, lastKi = -1, lastKd = -1;
   static uint32_t lastZcCount = 0xFFFFFFFF;
 
-  uint8_t motorSpeed = motorState.motorSpeed;
+  uint16_t motorSpeed = motorState.motorSpeed;
   AcFrequency acFreq = motorState.acFrequency;
   uint32_t zeroCrossingCount = getZeroCrossingCount();
   PidController* pid = getPressurePid();
@@ -167,7 +167,7 @@ void drawDebugInfo() {
     tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
     tft.setTextSize(2);
     tft.setCursor(LEFT_COLUMN_X + 80, STATUS_ZONE_Y + 22);
-    tft.printf("%3d%%", motorSpeed);
+    tft.printf("%3u.%1u%%", motorSpeed / 10, motorSpeed % 10);
   }
 
   if (acFreq != lastAcFreq) {
@@ -554,8 +554,8 @@ void drawRuntimeFooter() {
   tft.print("PRESS TO PAUSE / MENU");
 }
 
-void drawRuntimeMotorPower(uint8_t motorSpeed, bool forceRedraw) {
-  static uint8_t lastMotorSpeed = 255;
+void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw) {
+  static uint16_t lastMotorSpeed = 0xFFFF;
   if (!forceRedraw && motorSpeed == lastMotorSpeed) {
     return;
   }
@@ -565,7 +565,33 @@ void drawRuntimeMotorPower(uint8_t motorSpeed, bool forceRedraw) {
   tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
   tft.setTextSize(4);
   tft.setCursor(RUNTIME_RIGHT_X + 20, RUNTIME_FOOTER_Y + 45);
-  tft.printf("%3u", motorSpeed);
+  tft.printf("%3u.%1u", motorSpeed / 10, motorSpeed % 10);
   tft.setTextSize(2);
   tft.print("%");
+}
+
+void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, bool forceRedraw) {
+  static float lastRawPsi = -999.0f;
+  static bool lastValid = true;
+  static int32_t lastRawValue = 0;
+
+  if (!forceRedraw && valid == lastValid && fabsf(rawPsi - lastRawPsi) < 0.05f && rawValue == lastRawValue) {
+    return;
+  }
+
+  lastRawPsi = rawPsi;
+  lastValid = valid;
+  lastRawValue = rawValue;
+
+  tft.fillRect(20, 180, 220, 24, COLOR_BG);
+  tft.setTextColor(COLOR_DEBUG, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(20, 182);
+  if (!valid) {
+    tft.print("RAW --.- ------");
+  } else {
+    char rawStr[24];
+    snprintf(rawStr, sizeof(rawStr), "RAW %4.1f %ld", rawPsi, (long)rawValue);
+    tft.print(rawStr);
+  }
 }

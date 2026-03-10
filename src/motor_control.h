@@ -5,7 +5,7 @@
  * This module handles:
  * - Zero crossing detection via external interrupt
  * - Timer-based triac firing delay
- * - Motor speed control (0-100%)
+ * - Motor speed control (0-1000)
  * - AC frequency detection (50Hz/60Hz)
  */
 
@@ -54,7 +54,7 @@ typedef struct {
     volatile uint32_t zeroCrossingCount;    // Total zero crossing count
     volatile uint32_t lastZcTime;           // Last zero crossing timestamp (micros)
     volatile bool zcDetected;               // Flag set when ZC detected
-    uint16_t motorSpeed;                    // Motor speed 0-100%
+    uint16_t motorSpeed;                    // Motor speed 0-1000
     uint16_t motorPwm;                      // Current PWM delay value
     uint16_t maxDelay;                      // Maximum delay based on AC frequency
     AcFrequency acFrequency;                // Detected AC frequency
@@ -77,13 +77,13 @@ extern MotorControlState motorState;
 bool motorControlInit();
 
 /**
- * @brief Set motor speed (0-100%)
+ * @brief Set motor speed (0-1000)
  * 
  * Converts speed percentage to triac firing delay
  * 
- * @param speed Motor speed 0-100
+ * @param speed Motor speed 0-1000
  */
-void setMotorSpeed(uint8_t speed);
+void setMotorSpeed(uint16_t speed);
 
 /**
  * @brief Enable or disable motor
@@ -148,9 +148,9 @@ void pressurePidInit();
  * motor speed to achieve the target pressure.
  * 
  * @param currentPressurePsi Current measured pressure in PSI
- * @return Motor speed 0-100 that was set
+ * @return Motor speed 0-1000 that was set
  */
-uint8_t updateMotorFromPid(float currentPressurePsi);
+uint16_t updateMotorFromPid(float currentPressurePsi);
 
 /**
  * @brief Set target pressure for PID control

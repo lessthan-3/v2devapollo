@@ -37,7 +37,7 @@ void pidInit(PidController *pid, float kp, float ki, float kd) {
     pid->outputMin = PID_OUTPUT_MIN;
     pid->outputMax = PID_OUTPUT_MAX;
     pid->integralMax = PID_INTEGRAL_MAX;
-    pid->deadband = 0.1f;  // 0.1 PSI deadband
+    pid->deadband = 0.0f;  // 0.1 PSI deadband
     
     pid->hasStoredParams = false;
     

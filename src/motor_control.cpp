@@ -169,22 +169,22 @@ bool motorControlInit() {
      
 }
 
-void setMotorSpeed(uint8_t speed) {
-    // Clamp speed to 0-100
-    if (speed > 100) {
-        speed = 100;
+void setMotorSpeed(uint16_t speed) {
+    // Clamp speed to 0-1000
+    if (speed > 1000) {
+        speed = 1000;
     }
     
     motorState.motorSpeed = speed;
     
     // Convert speed to delay value
     // Speed 0 = max delay (no firing)
-    // Speed 100 = min delay (full power)
+    // Speed 1000 = min delay (full power)
     if (speed == 0) {
         motorState.motorPwm = motorState.maxDelay;
     } else {
-        uint16_t speedDelay = (uint16_t)speed * motorState.maxDelay / 100;
-        motorState.motorPwm = motorState.maxDelay - speedDelay;
+        uint32_t speedDelay = (uint32_t)speed * motorState.maxDelay / 1000;
+        motorState.motorPwm = (uint16_t)(motorState.maxDelay - speedDelay);
         
         // Ensure minimum delay
         if (motorState.motorPwm < MINDELAY) {
@@ -293,8 +293,8 @@ void motorControlDebugReport() {
         Serial.printf("  Zero Crossings: %lu (total), +%lu (last %d sec)\n", 
                       currentCount, countDelta, DEBUG_REPORT_INTERVAL_MS / 1000);
         Serial.printf("  Measured AC Freq: %.1f Hz\n", measuredFreq);
-        Serial.printf("  Motor Speed: %u%%, PWM Delay: %u us\n", 
-                      motorState.motorSpeed, motorState.motorPwm);
+        Serial.printf("  Motor Speed: %u.%u%%, PWM Delay: %u us\n", 
+                  motorState.motorSpeed / 10, motorState.motorSpeed % 10, motorState.motorPwm);
         Serial.printf("  Motor Enabled: %s, Max Delay: %u us\n",
                       motorState.motorEnabled ? "YES" : "NO", motorState.maxDelay);
     #ifdef TRIAC_DEBUG_SERIAL
@@ -342,7 +342,7 @@ void pressurePidInit() {
     Serial.println("Pressure PID: Initialization complete");
 }
 
-uint8_t updateMotorFromPid(float currentPressurePsi) {
+uint16_t updateMotorFromPid(float currentPressurePsi) {
     // Don't run PID if motor is disabled
     if (!motorState.motorEnabled) {
         return 0;
@@ -353,8 +353,8 @@ uint8_t updateMotorFromPid(float currentPressurePsi) {
 
     // Apply adjustment to current speed and clamp to 20-100
     int targetSpeed = (int)motorState.motorSpeed + (int)lroundf(pidAdjustment);
-    targetSpeed = constrain(targetSpeed, 20, 100);
-    uint8_t speed = (uint8_t)targetSpeed;
+    targetSpeed = constrain(targetSpeed, 200, 1000);
+    uint16_t speed = (uint16_t)targetSpeed;
 
     // Set motor speed
     setMotorSpeed(speed);

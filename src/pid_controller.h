@@ -23,9 +23,9 @@
 #define PID_KD_DEFAULT      2.0f    // Default derivative gain (reduced)
 
 // PID Output Limits
-#define PID_OUTPUT_MIN      -100.0f // Minimum PID output (motor speed adjustment)
-#define PID_OUTPUT_MAX      100.0f  // Maximum PID output (motor speed adjustment)
-#define PID_INTEGRAL_MAX    500.0f  // Anti-windup limit for integral term
+#define PID_OUTPUT_MIN      -1000.0f // Minimum PID output (motor speed adjustment)
+#define PID_OUTPUT_MAX      1000.0f  // Maximum PID output (motor speed adjustment)
+#define PID_INTEGRAL_MAX    1000.0f  // Anti-windup limit for integral term
 
 // Gain limits
 #define PID_KP_MIN          0.25f

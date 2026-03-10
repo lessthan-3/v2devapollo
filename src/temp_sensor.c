@@ -12,7 +12,7 @@ void tempSensorInit(void) {
 }
 
 uint16_t tempSensorReadAdc(void) {
-  int value = analogRead((unsigned char)TEMP_SENSOR_PIN);
+  int value = analogRead((unsigned char)TEMP_SENSOR_PIN) / 10;
   if (value < 0) {
     value = 0;
   }

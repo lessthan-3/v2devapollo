@@ -12,7 +12,7 @@ The following is the pinout for all the peripherals used in this project:
   IO2 - Triac Gate Control
   IO20 - Zero Crossing Detection
   IO4 - Alarm Beeper
-  IO38 - Temperature Sensor (1-Wire)
+  IO3 - Temperature Sensor (1-Wire adc)
 
   Pressure Sensor - WF1OODPZ 2BG S6 DT
     IO19- CSB - pull low for for spi

@@ -28,7 +28,7 @@
 #define IDLE_STABLE_SECONDS         2     // Seconds at idle target before holding speed
 #define IDLE_STABLE_BAND_PSI        0.15f // Allowed deviation at idle target for stability
 #define IDLE_EXIT_DROP_PSI          0.3f  // Pressure drop below idle target to exit
-#define IDLE_MIN_HOLD_SPEED         5     // Minimum motor speed to hold in idle
+#define IDLE_MIN_HOLD_SPEED         50     // Minimum motor speed to hold in idle (0-1000 scale)
 
 // Shared data structure (thread-safe access)
 typedef struct {
@@ -44,8 +44,9 @@ typedef struct {
     
     // Outputs (written by motor task, read by display task)
     volatile float currentPsi;          // Current pressure reading
+    volatile int32_t rawPressure;       // Raw 24-bit pressure value
     volatile float smoothedPsi;         // Smoothed pressure
-    volatile uint8_t motorSpeed;        // Current motor speed 0-100%
+    volatile uint16_t motorSpeed;       // Current motor speed 0-1000
     volatile float pidOutput;           // Raw PID output
     volatile bool pressureValid;        // Pressure sensor status
     volatile uint32_t idleSecondsRemaining; // Seconds until power pause activates
@@ -82,10 +83,17 @@ void setTargetPressureSafe(float psi);
 float getCurrentPressureSafe(void);
 
 /**
- * @brief Get motor speed (thread-safe)
- * @return Motor speed 0-100%
+ * @brief Get raw sensor pressure (thread-safe)
+ * @param pressurePsi Pointer to store raw pressure in PSI
+ * @param valid Pointer to store sensor validity
  */
-uint8_t getMotorSpeedSafe(void);
+void getRawPressureSafe(float *pressurePsi, int32_t *rawValue, bool *valid);
+
+/**
+ * @brief Get motor speed (thread-safe)
+ * @return Motor speed 0-1000
+ */
+uint16_t getMotorSpeedSafe(void);
 
 /**
  * @brief Get motor loop timing stats (thread-safe)

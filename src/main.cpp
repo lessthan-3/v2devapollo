@@ -59,9 +59,9 @@ Preferences preferences;
 #define FIRMWARE_VERSION    "2.0.0"
 
 // PID gain adjustment step sizes
-#define KP_STEP             0.25f
-#define KI_STEP             0.25f
-#define KD_STEP             0.25f
+#define KP_STEP             0.05f
+#define KI_STEP             0.05f
+#define KD_STEP             0.05f
 #define KP_MIN              0.25f
 #define KP_MAX              100.0f
 #define KI_MIN              0.0f
@@ -134,7 +134,7 @@ void setup() {
   Serial.println("Apollo Sprayers HVLP - ESP32-S3");
   Serial.println("Initializing...");
 
-  //beeperInit();
+  beeperInit();
 
   // Initialize backlight pin
   pinMode(TFT_BL, OUTPUT);
@@ -156,7 +156,10 @@ void setup() {
   lastEncoderCount = encoder.getCount();
 
   // Initialize temperature sensor
-  //tempSensorInit();
+  pinMode(TEMP_SENSOR_PIN, INPUT);
+  analogReadResolution(12);
+  analogSetPinAttenuation(TEMP_SENSOR_PIN, ADC_11db);
+  tempSensorInit();
   
   // Initialize encoder button
   pinMode(ENCODER_BTN, INPUT_PULLUP);
@@ -340,6 +343,13 @@ void enterRuntimeScreen() {
   drawRuntimePauseCountdown(idleSecondsRemaining, true);
   drawRuntimeFooter();
   drawRuntimeMotorPower(getMotorSpeedSafe(), true);
+#if DEBUG_DISPLAY_SENSOR_PRESSURE
+  float rawPsi = 0.0f;
+  int32_t rawValue = 0;
+  bool rawValid = false;
+  getRawPressureSafe(&rawPsi, &rawValue, &rawValid);
+  drawRuntimeSensorPressureDebug(rawPsi, rawValue, rawValid, true);
+#endif
 }
 
 void enterSettingsScreen() {
@@ -384,6 +394,11 @@ void loop() {
   static float smoothedPressure = 0.0f;
   static bool displayValid = false;
   static uint32_t idleSecondsRemaining = UINT32_MAX;
+#if DEBUG_DISPLAY_SENSOR_PRESSURE
+  static float rawSensorPressure = 0.0f;
+  static int32_t rawSensorValue = 0;
+  static bool rawSensorValid = false;
+#endif
 
   // Read shared data from motor control task (thread-safe)
   {
@@ -395,6 +410,10 @@ void loop() {
     portEXIT_CRITICAL(&motorShared.mutex);
     pidLoopIntervalMs = loopUs / 1000;
   }
+
+#if DEBUG_DISPLAY_SENSOR_PRESSURE
+  getRawPressureSafe(&rawSensorPressure, &rawSensorValue, &rawSensorValid);
+#endif
 
   // Encoder handling based on screen
   int64_t encoderCount = encoder.getCount();
@@ -530,7 +549,9 @@ void loop() {
   if (now - lastTempRead >= TEMP_READ_INTERVAL_MS) {
     //toggleBeeper();  // Toggle beeper state for testing
     lastTempRead = now;
-    //currentTemperatureC = tempSensorReadC();
+    uint16_t tempAdc = tempSensorReadAdc();
+    currentTemperatureC = ((float)tempAdc - (float)TEMP_OFFSET) * (float)TEMP_MULT / (float)TEMP_DIVISOR;
+    //Serial.printf("Temp ADC=%u, C=%.2f, pin=%u\n", tempAdc, currentTemperatureC, (unsigned)TEMP_SENSOR_PIN);
 
     if (currentTemperatureC > TEMP_OVERHEAT_SETPOINT) {
       if (!overTempActive) {
@@ -554,6 +575,9 @@ void loop() {
       drawRuntimeTarget(targetPsi, smoothedPressure, displayValid);
       drawRuntimeTemperature(currentTemperatureC);
       drawRuntimeMotorPower(getMotorSpeedSafe());
+#if DEBUG_DISPLAY_SENSOR_PRESSURE
+  drawRuntimeSensorPressureDebug(rawSensorPressure, rawSensorValue, rawSensorValid);
+#endif
     }
 
     if (now - lastPauseUpdate >= 1000) {

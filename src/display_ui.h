@@ -38,6 +38,9 @@ extern TFT_eSPI tft;
 
 #define MINMAX_FLASH_MS     500
 
+// Temporary debug toggle for raw sensor pressure display
+#define DEBUG_DISPLAY_SENSOR_PRESSURE 1
+
 // Colors
 #define COLOR_TARGET        TFT_YELLOW
 #define COLOR_CURRENT       TFT_CYAN
@@ -76,6 +79,7 @@ void drawRuntimeTarget(float target, float current, bool valid, bool forceRedraw
 void drawRuntimeTemperature(float tempC, bool forceRedraw = false);
 void drawRuntimePauseCountdown(uint32_t secondsRemaining, bool forceRedraw = false);
 void drawRuntimeFooter();
-void drawRuntimeMotorPower(uint8_t motorSpeed, bool forceRedraw = false);
+void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw = false);
+void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, bool forceRedraw = false);
 
 #endif

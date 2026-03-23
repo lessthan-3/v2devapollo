@@ -21,14 +21,20 @@
 #define MOTOR_LOOP_INTERVAL_US  5000    // 5ms loop interval (200Hz)
 
 // Idle / power pause behavior
-#define IDLE_ENTRY_SECONDS          20    // Seconds of stable pressure before idle
+#define IDLE_ENTRY_SECONDS          20    // Default seconds of stable pressure before idle
 #define IDLE_ENTRY_DEVIATION_PSI    0.3f  // Allowed deviation from target to count as stable
-#define IDLE_ENTRY_DECREASE         50     // Counter decrease rate when outside band
+#define IDLE_ENTRY_DECREASE         200     // Counter decrease rate when outside band
 #define IDLE_TARGET_PSI             2.5f  // Idle pressure target
 #define IDLE_STABLE_SECONDS         2     // Seconds at idle target before holding speed
 #define IDLE_STABLE_BAND_PSI        0.15f // Allowed deviation at idle target for stability
-#define IDLE_EXIT_DROP_PSI          0.3f  // Pressure drop below idle target to exit
+#define IDLE_EXIT_DROP_PSI          0.2f  // Pressure drop below idle target to exit
 #define IDLE_MIN_HOLD_SPEED         50     // Minimum motor speed to hold in idle (0-1000 scale)
+
+typedef enum {
+    IDLE_STATE_OFF = 0,
+    IDLE_STATE_PID_RAMP,
+    IDLE_STATE_HOLD
+} IdleState;
 
 // Shared data structure (thread-safe access)
 typedef struct {
@@ -41,6 +47,7 @@ typedef struct {
     volatile float pidKi;               // PID integral gain
     volatile float pidKd;               // PID derivative gain
     volatile float idleEntryDeviationPsi; // Allowed deviation from target to count as stable
+    volatile uint16_t idleEntrySeconds;   // Seconds of stable pressure before idle
     
     // Outputs (written by motor task, read by display task)
     volatile float currentPsi;          // Current pressure reading
@@ -50,6 +57,8 @@ typedef struct {
     volatile float pidOutput;           // Raw PID output
     volatile bool pressureValid;        // Pressure sensor status
     volatile uint32_t idleSecondsRemaining; // Seconds until power pause activates
+    volatile uint8_t idleState;        // Current power pause state
+    volatile bool idleExitRequest;      // Request exit from power pause
     volatile uint32_t loopCount;        // Motor loop iteration count
     volatile uint32_t loopTimeUs;       // Actual loop time in microseconds
     volatile uint32_t maxLoopTimeUs;    // Maximum loop time observed
@@ -129,19 +138,23 @@ void setPidGainsSafe(float kp, float ki, float kd);
  */
 void getPidGainsSafe(float *kp, float *ki, float *kd);
 
+/**
+ * @brief Set idle entry duration (thread-safe)
+ * @param seconds Seconds of stable pressure before idle
+ */
+void setIdleEntrySecondsSafe(uint16_t seconds);
+
+/**
+ * @brief Get idle entry duration (thread-safe)
+ * @return Seconds of stable pressure before idle
+ */
+uint16_t getIdleEntrySecondsSafe(void);
+
 void setIdleEntryDeviationSafe(float deviationPsi);
 float getIdleEntryDeviationSafe(void);
 
 /**
- * @brief Set idle entry deviation band (thread-safe)
- * @param deviationPsi Allowed deviation from target to count as stable
+ * @brief Request exit from power pause (thread-safe)
  */
-void setIdleEntryDeviationSafe(float deviationPsi);
-
-/**
- * @brief Get idle entry deviation band (thread-safe)
- * @return Allowed deviation from target to count as stable
- */
-float getIdleEntryDeviationSafe(void);
-
+void requestIdleExitSafe(void);
 #endif // DUAL_CORE_MOTOR_H

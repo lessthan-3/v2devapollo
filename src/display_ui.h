@@ -3,6 +3,7 @@
 
 #include <Arduino.h>
 #include <TFT_eSPI.h>
+#include "dual_core_motor.h"
 
 extern TFT_eSPI tft;
 
@@ -27,19 +28,19 @@ extern TFT_eSPI tft;
 #define RUNTIME_FOOTER_WIDTH (CELL_WIDTH * 2)
 
 // Menu
-#define MENU_OPTION_COUNT   3
+#define MENU_OPTION_COUNT   4
 #define MENU_OPTION_HEIGHT  40
 #define MENU_TOP_Y          90
 
 // Settings
-#define SETTINGS_OPTION_COUNT 6
+#define SETTINGS_OPTION_COUNT 7
 #define SETTINGS_OPTION_HEIGHT 36
 #define SETTINGS_TOP_Y      70
 
 #define MINMAX_FLASH_MS     500
 
 // Temporary debug toggle for raw sensor pressure display
-#define DEBUG_DISPLAY_SENSOR_PRESSURE 1
+// #define DEBUG_DISPLAY_SENSOR_PRESSURE 1
 
 // Colors
 #define COLOR_TARGET        TFT_YELLOW
@@ -71,9 +72,12 @@ void updateMinMaxFlash();
 void drawStartupScreen();
 void drawMenuScreen(uint8_t menuIndex, bool forceRedraw = false);
 void drawMenuFooter(const char* message, uint16_t color);
-void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, bool editing, bool forceRedraw = false);
+void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool editing, bool forceRedraw = false);
 void drawSettingsFooter(const char* message, uint16_t color);
-void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, bool selected, bool editing);
+void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool selected, bool editing);
+void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, bool editing, bool forceRedraw = false);
+void drawPowerPauseSettingsFooter(const char* message, uint16_t color);
+void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, bool selected, bool editing);
 void drawRuntimeStatic();
 void drawRuntimeTarget(float target, float current, bool valid, bool forceRedraw = false);
 void drawRuntimeTemperature(float tempC, bool forceRedraw = false);
@@ -81,5 +85,6 @@ void drawRuntimePauseCountdown(uint32_t secondsRemaining, bool forceRedraw = fal
 void drawRuntimeFooter();
 void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw = false);
 void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, bool forceRedraw = false);
+void drawRuntimePowerPauseOverlay(IdleState idleState, bool forceRedraw = false);
 
 #endif

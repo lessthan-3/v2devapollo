@@ -74,12 +74,21 @@ Preferences preferences;
 #define IDLE_DEV_MIN        0.05f
 #define IDLE_DEV_MAX        2.0f
 
+// Power pause settings
+#define POWER_PAUSE_SEC_MIN 0
+#define POWER_PAUSE_SEC_MAX 600
+#define POWER_PAUSE_SEC_STEP 1
+#define POWER_PAUSE_WARN_SEC_MIN 0
+#define POWER_PAUSE_WARN_SEC_MAX 600
+#define POWER_PAUSE_WARN_SEC_STEP 1
+
 // Screen state enumeration
 typedef enum {
   SCREEN_STARTUP = 0,
   SCREEN_MENU,
   SCREEN_RUNTIME,
-  SCREEN_SETTINGS
+  SCREEN_SETTINGS,
+  SCREEN_POWERPAUSE_SETTINGS
 } ScreenState;
 
 // Global state variables
@@ -97,6 +106,7 @@ ScreenState currentScreen = SCREEN_STARTUP;
 uint8_t menuIndex = 0;
 int32_t menuScrollAccumulator = 0;
 int32_t settingsScrollAccumulator = 0;
+int32_t powerPauseScrollAccumulator = 0;
 uint32_t runtimeStartMillis = 0;
 uint32_t runtimePauseDeadlineSec = 0;
 
@@ -107,7 +117,16 @@ float settingsKp = PID_KP_DEFAULT;
 float settingsKi = PID_KI_DEFAULT;
 float settingsKd = PID_KD_DEFAULT;
 float settingsIdleDev = IDLE_ENTRY_DEVIATION_PSI;
+float settingsStartPsi = TARGET_PSI_DEFAULT;
 bool settingsDirty = false;
+
+// Power pause settings state
+uint8_t powerPauseIndex = 0;
+bool powerPauseEditing = false;
+uint16_t powerPauseSeconds = IDLE_ENTRY_SECONDS;
+bool powerPauseBeeperEnabled = true;
+uint16_t powerPauseWarnSeconds = 5;
+bool powerPauseDirty = false;
 
 // Encoder mode state
 EncoderMode currentEncoderMode = MODE_TARGET_PRESSURE;
@@ -124,9 +143,11 @@ void saveHourMeter();
 void enterMenuScreen();
 void enterRuntimeScreen();
 void enterSettingsScreen();
+void enterPowerPauseSettingsScreen();
 void syncPidGainsFromSettings(bool saveToNvs);
 void loadSettings();
 void saveSettings();
+void syncPowerPauseSettings(bool saveToNvs);
 
 void setup() {
   Serial.begin(115200);
@@ -166,38 +187,43 @@ void setup() {
 
   
   Serial.println("Encoder initialized");
-  tft.setCursor(180, 240);
-  tft.setTextColor(TFT_GREEN, COLOR_BG);
-  tft.println("Encoder: OK");
+  // tft.setCursor(180, 240);
+  // tft.setTextColor(TFT_GREEN, COLOR_BG);
+  // tft.println("Encoder: OK");
   
   // Note: Pressure sensor will be initialized on Core 0 in motorControlTask
   // This is required because Wire/I2C must be used from the same core it was initialized on
-  tft.setCursor(180, 250);
-  tft.setTextColor(TFT_YELLOW, COLOR_BG);
-  tft.println("Pressure: Core0");
+  // tft.setCursor(180, 250);
+  // tft.setTextColor(TFT_YELLOW, COLOR_BG);
+  // tft.println("Pressure: Core0");
   
   // Load hour meter from flash
   loadHourMeter();
-  tft.setCursor(180, 260);
-  tft.setTextColor(TFT_GREEN, COLOR_BG);
-  tft.printf("Hours: %lu.%lu", totalRuntimeTenths / 10, totalRuntimeTenths % 10);
+  // tft.setCursor(180, 260);
+  // tft.setTextColor(TFT_GREEN, COLOR_BG);
+  // tft.printf("Hours: %lu.%lu", totalRuntimeTenths / 10, totalRuntimeTenths % 10);
 
   // Load settings from flash
   loadSettings();
+
+  targetPsi = settingsStartPsi;
+  setTargetPressureSafe(targetPsi);
+  encoder.setCount((int64_t)lroundf(targetPsi / TARGET_PSI_STEP));
+  lastEncoderCount = encoder.getCount();
   
   // Initialize motor control (zero crossing interrupt)
   delay(100);
   if (motorControlInit()) {
-    tft.setCursor(180, 270);
-    tft.setTextColor(TFT_GREEN, COLOR_BG);
-    tft.println("Motor: OK");
+    //tft.setCursor(180, 270);
+    //tft.setTextColor(TFT_GREEN, COLOR_BG);
+    //tft.println("Motor: OK");
     Serial.println("Motor control initialized");
     
     // Initialize the pressure PID controller (loads saved gains from NVS)
     pressurePidInit();
-    tft.setCursor(180, 275);
-    tft.setTextColor(TFT_GREEN, COLOR_BG);
-    tft.println("PID: OK");
+    //tft.setCursor(180, 275);
+    //tft.setTextColor(TFT_GREEN, COLOR_BG);
+    //tft.println("PID: OK");
     
     // Sync initial PID gains to the shared data for dual-core motor task
     {
@@ -212,32 +238,32 @@ void setup() {
     AcFrequency acFreq = detectAcFrequency();
     tft.setCursor(180, 280);
     if (acFreq != AC_FREQ_UNKNOWN) {
-      tft.setTextColor(TFT_GREEN, COLOR_BG);
-      tft.printf("AC: %dHz", acFreq);
+      //tft.setTextColor(TFT_GREEN, COLOR_BG);
+      //tft.printf("AC: %dHz", acFreq);
     } else {
-      tft.setTextColor(TFT_ORANGE, COLOR_BG);
-      tft.println("AC: Unknown");
+      //tft.setTextColor(TFT_ORANGE, COLOR_BG);
+      //tft.println("AC: Unknown");
     }
     
     // Initialize dual-core motor control (runs PID on Core 0)
     if (dualCoreMotorInit()) {
-      tft.setCursor(180, 290);
-      tft.setTextColor(TFT_GREEN, COLOR_BG);
-      tft.println("Dual-Core: OK");
+      //tft.setCursor(180, 290);
+      //tft.setTextColor(TFT_GREEN, COLOR_BG);
+      //tft.println("Dual-Core: OK");
       Serial.println("Dual-core motor control initialized");
       
       // Set initial target pressure
       setTargetPressureSafe(TARGET_PSI_DEFAULT);
     } else {
-      tft.setCursor(180, 290);
-      tft.setTextColor(TFT_RED, COLOR_BG);
-      tft.println("Dual-Core: FAIL");
+      //tft.setCursor(180, 290);
+      //tft.setTextColor(TFT_RED, COLOR_BG);
+      //tft.println("Dual-Core: FAIL");
       Serial.println("Dual-core motor control FAILED");
     }
   } else {
-    tft.setCursor(180, 270);
+    //tft.setCursor(180, 270);
     tft.setTextColor(TFT_RED, COLOR_BG);
-    tft.println("Motor: FAIL");
+    //tft.println("Motor: FAIL");
     Serial.println("Motor control FAILED");
   }
   
@@ -280,18 +306,37 @@ void loadHourMeter() {
 void loadSettings() {
   if (preferences.begin("apollo", true)) {
     settingsIdleDev = preferences.getFloat("idleDev", IDLE_ENTRY_DEVIATION_PSI);
+    settingsStartPsi = preferences.getFloat("startPsi", TARGET_PSI_DEFAULT);
+    powerPauseSeconds = preferences.getUShort("idleSec", IDLE_ENTRY_SECONDS);
+    powerPauseBeeperEnabled = preferences.getBool("warnBeep", true);
+    powerPauseWarnSeconds = preferences.getUShort("warnSec", 5);
     preferences.end();
   } else {
     preferences.end();
     settingsIdleDev = IDLE_ENTRY_DEVIATION_PSI;
+    settingsStartPsi = TARGET_PSI_DEFAULT;
+    powerPauseSeconds = IDLE_ENTRY_SECONDS;
+    powerPauseBeeperEnabled = true;
+    powerPauseWarnSeconds = 5;
   }
   settingsIdleDev = constrain(settingsIdleDev, IDLE_DEV_MIN, IDLE_DEV_MAX);
+  settingsStartPsi = constrain(settingsStartPsi, TARGET_PSI_MIN, TARGET_PSI_MAX);
+  powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
+  powerPauseWarnSeconds = constrain(powerPauseWarnSeconds, POWER_PAUSE_WARN_SEC_MIN, POWER_PAUSE_WARN_SEC_MAX);
+  if (powerPauseWarnSeconds > powerPauseSeconds) {
+    powerPauseWarnSeconds = powerPauseSeconds;
+  }
   setIdleEntryDeviationSafe(settingsIdleDev);
+  setIdleEntrySecondsSafe(powerPauseSeconds);
 }
 
 void saveSettings() {
   if (preferences.begin("apollo", false)) {
     preferences.putFloat("idleDev", settingsIdleDev);
+    preferences.putFloat("startPsi", settingsStartPsi);
+    preferences.putUShort("idleSec", powerPauseSeconds);
+    preferences.putBool("warnBeep", powerPauseBeeperEnabled);
+    preferences.putUShort("warnSec", powerPauseWarnSeconds);
     preferences.end();
   } else {
     preferences.end();
@@ -366,7 +411,27 @@ void enterSettingsScreen() {
   encoder.setCount(settingsIndex);
   lastEncoderCount = encoder.getCount();
 
-  drawSettingsScreen(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsEditing, true);
+  drawSettingsScreen(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, settingsEditing, true);
+}
+
+void enterPowerPauseSettingsScreen() {
+  currentScreen = SCREEN_POWERPAUSE_SETTINGS;
+  powerPauseEditing = false;
+  powerPauseDirty = false;
+  powerPauseIndex = 0;
+  powerPauseScrollAccumulator = 0;
+
+  powerPauseSeconds = getIdleEntrySecondsSafe();
+  powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
+  powerPauseWarnSeconds = constrain(powerPauseWarnSeconds, POWER_PAUSE_WARN_SEC_MIN, POWER_PAUSE_WARN_SEC_MAX);
+  if (powerPauseWarnSeconds > powerPauseSeconds) {
+    powerPauseWarnSeconds = powerPauseSeconds;
+  }
+
+  encoder.setCount(powerPauseIndex);
+  lastEncoderCount = encoder.getCount();
+
+  drawPowerPauseSettingsScreen(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, powerPauseEditing, true);
 }
 
 void syncPidGainsFromSettings(bool saveToNvs) {
@@ -384,6 +449,21 @@ void syncPidGainsFromSettings(bool saveToNvs) {
   }
 }
 
+void syncPowerPauseSettings(bool saveToNvs) {
+  powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
+  powerPauseWarnSeconds = constrain(powerPauseWarnSeconds, POWER_PAUSE_WARN_SEC_MIN, POWER_PAUSE_WARN_SEC_MAX);
+  if (powerPauseWarnSeconds > powerPauseSeconds) {
+    powerPauseWarnSeconds = powerPauseSeconds;
+  }
+
+  setIdleEntrySecondsSafe(powerPauseSeconds);
+
+  if (saveToNvs) {
+    saveSettings();
+    powerPauseDirty = false;
+  }
+}
+
 
 void loop() {
   // Timing variables
@@ -391,9 +471,13 @@ void loop() {
   static unsigned long lastPauseUpdate = 0;
   static unsigned long lastHourMeterUpdate = 0;
   static unsigned long lastTempRead = 0;
+  static unsigned long lastBeeperToggle = 0;
+  static bool beeperOutput = false;
   static float smoothedPressure = 0.0f;
   static bool displayValid = false;
   static uint32_t idleSecondsRemaining = UINT32_MAX;
+  static IdleState idleState = IDLE_STATE_OFF;
+  static IdleState lastOverlayState = IDLE_STATE_OFF;
 #if DEBUG_DISPLAY_SENSOR_PRESSURE
   static float rawSensorPressure = 0.0f;
   static int32_t rawSensorValue = 0;
@@ -406,6 +490,7 @@ void loop() {
     smoothedPressure = motorShared.smoothedPsi;
     displayValid = motorShared.pressureValid;
     idleSecondsRemaining = motorShared.idleSecondsRemaining;
+    idleState = (IdleState)motorShared.idleState;
     uint32_t loopUs = motorShared.loopTimeUs;
     portEXIT_CRITICAL(&motorShared.mutex);
     pidLoopIntervalMs = loopUs / 1000;
@@ -443,6 +528,9 @@ void loop() {
         drawMenuScreen(menuIndex, false);
       }
     } else if (currentScreen == SCREEN_RUNTIME) {
+      if (idleState != IDLE_STATE_OFF) {
+        requestIdleExitSafe();
+      }
       float newTarget = targetPsi + (delta * TARGET_PSI_STEP);
       if (newTarget < TARGET_PSI_MIN) newTarget = TARGET_PSI_MIN;
       if (newTarget > TARGET_PSI_MAX) newTarget = TARGET_PSI_MAX;
@@ -456,6 +544,7 @@ void loop() {
         if (settingsIndex == 1) step = KI_STEP;
         if (settingsIndex == 2) step = KD_STEP;
         if (settingsIndex == 3) step = IDLE_DEV_STEP;
+        if (settingsIndex == 4) step = TARGET_PSI_STEP;
 
         if (step > 0.0f) {
           float change = (float)delta * step;
@@ -467,10 +556,14 @@ void loop() {
             settingsKd = constrain(settingsKd + change, KD_MIN, KD_MAX);
           } else if (settingsIndex == 3) {
             settingsIdleDev = constrain(settingsIdleDev + change, IDLE_DEV_MIN, IDLE_DEV_MAX);
+          } else if (settingsIndex == 4) {
+            settingsStartPsi = constrain(settingsStartPsi + change, TARGET_PSI_MIN, TARGET_PSI_MAX);
           }
           settingsDirty = true;
-          syncPidGainsFromSettings(false);
-          drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, true, true);
+          if (settingsIndex <= 3) {
+            syncPidGainsFromSettings(false);
+          }
+          drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, true);
         }
       } else {
         settingsScrollAccumulator += (int32_t)delta;
@@ -493,8 +586,62 @@ void loop() {
           encoder.setCount(settingsIndex);
           lastEncoderCount = encoder.getCount();
           if (previousIndex != settingsIndex) {
-            drawSettingsRow(previousIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, false, false);
-            drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, true, false);
+            drawSettingsRow(previousIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, false, false);
+            drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, false);
+          }
+        }
+      }
+    } else if (currentScreen == SCREEN_POWERPAUSE_SETTINGS) {
+      if (powerPauseEditing) {
+        if (powerPauseIndex == 0) {
+          int32_t change = (int32_t)delta * POWER_PAUSE_SEC_STEP;
+          int32_t nextValue = (int32_t)powerPauseSeconds + change;
+          powerPauseSeconds = (uint16_t)constrain(nextValue, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
+          if (powerPauseWarnSeconds > powerPauseSeconds) {
+            powerPauseWarnSeconds = powerPauseSeconds;
+          }
+          powerPauseDirty = true;
+          syncPowerPauseSettings(false);
+          drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, true);
+        } else if (powerPauseIndex == 1) {
+          if (delta != 0) {
+            powerPauseBeeperEnabled = !powerPauseBeeperEnabled;
+            powerPauseDirty = true;
+            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, true);
+          }
+        } else if (powerPauseIndex == 2) {
+          int32_t change = (int32_t)delta * POWER_PAUSE_WARN_SEC_STEP;
+          int32_t nextValue = (int32_t)powerPauseWarnSeconds + change;
+          powerPauseWarnSeconds = (uint16_t)constrain(nextValue, POWER_PAUSE_WARN_SEC_MIN, POWER_PAUSE_WARN_SEC_MAX);
+          if (powerPauseWarnSeconds > powerPauseSeconds) {
+            powerPauseWarnSeconds = powerPauseSeconds;
+          }
+          powerPauseDirty = true;
+          drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, true);
+        }
+      } else {
+        powerPauseScrollAccumulator += (int32_t)delta;
+        int32_t powerPauseSteps = 0;
+        while (powerPauseScrollAccumulator >= 2) {
+          powerPauseSteps++;
+          powerPauseScrollAccumulator -= 2;
+        }
+        while (powerPauseScrollAccumulator <= -2) {
+          powerPauseSteps--;
+          powerPauseScrollAccumulator += 2;
+        }
+
+        if (powerPauseSteps != 0) {
+          uint8_t previousIndex = powerPauseIndex;
+          int32_t newIndex = (int32_t)powerPauseIndex + powerPauseSteps;
+          if (newIndex < 0) newIndex = 0;
+          if (newIndex > 4) newIndex = 4;
+          powerPauseIndex = (uint8_t)newIndex;
+          encoder.setCount(powerPauseIndex);
+          lastEncoderCount = encoder.getCount();
+          if (previousIndex != powerPauseIndex) {
+            drawPowerPauseSettingsRow(previousIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, false, false);
+            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, false);
           }
         }
       }
@@ -515,6 +662,8 @@ void loop() {
         } else if (menuIndex == 1) {
           enterSettingsScreen();
         } else if (menuIndex == 2) {
+          enterPowerPauseSettingsScreen();
+        } else if (menuIndex == 3) {
           drawMenuFooter("Firmware " FIRMWARE_VERSION, TFT_CYAN);
         }
       } else if (currentScreen == SCREEN_RUNTIME) {
@@ -522,21 +671,46 @@ void loop() {
       } else if (currentScreen == SCREEN_SETTINGS) {
         if (settingsEditing) {
           settingsEditing = false;
-          drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, true, false);
+          drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, false);
           drawSettingsFooter("Press to edit / select", TFT_GREEN);
         } else {
-          if (settingsIndex <= 3) {
+          if (settingsIndex <= 4) {
             settingsEditing = true;
-            drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, true, true);
+            drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, true);
             drawSettingsFooter("Rotate to adjust, press to exit", TFT_YELLOW);
-          } else if (settingsIndex == 4) {
+          } else if (settingsIndex == 5) {
             if (settingsDirty) {
               syncPidGainsFromSettings(true);
+              targetPsi = settingsStartPsi;
+              setTargetPressureSafe(targetPsi);
+              encoder.setCount((int64_t)lroundf(targetPsi / TARGET_PSI_STEP));
+              lastEncoderCount = encoder.getCount();
               drawSettingsFooter("PID saved", TFT_GREEN);
             } else {
               drawSettingsFooter("No changes to save", TFT_ORANGE);
             }
-          } else if (settingsIndex == 5) {
+          } else if (settingsIndex == 6) {
+            enterMenuScreen();
+          }
+        }
+      } else if (currentScreen == SCREEN_POWERPAUSE_SETTINGS) {
+        if (powerPauseEditing) {
+          powerPauseEditing = false;
+          drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, false);
+          drawPowerPauseSettingsFooter("Press to edit / select", TFT_GREEN);
+        } else {
+          if (powerPauseIndex <= 2) {
+            powerPauseEditing = true;
+            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, true);
+            drawPowerPauseSettingsFooter("Rotate to adjust, press to exit", TFT_YELLOW);
+          } else if (powerPauseIndex == 3) {
+            if (powerPauseDirty) {
+              syncPowerPauseSettings(true);
+              drawPowerPauseSettingsFooter("Settings saved", TFT_GREEN);
+            } else {
+              drawPowerPauseSettingsFooter("No changes to save", TFT_ORANGE);
+            }
+          } else if (powerPauseIndex == 4) {
             enterMenuScreen();
           }
         }
@@ -570,19 +744,77 @@ void loop() {
   }
 
   if (currentScreen == SCREEN_RUNTIME) {
+    if (idleState != lastOverlayState) {
+      if (idleState == IDLE_STATE_OFF) {
+        drawRuntimeStatic();
+        drawRuntimeTarget(targetPsi, smoothedPressure, displayValid, true);
+        drawRuntimeTemperature(currentTemperatureC, true);
+        drawRuntimePauseCountdown(idleSecondsRemaining, true);
+        drawRuntimeFooter();
+        drawRuntimeMotorPower(getMotorSpeedSafe(), true);
+#if DEBUG_DISPLAY_SENSOR_PRESSURE
+        drawRuntimeSensorPressureDebug(rawSensorPressure, rawSensorValue, rawSensorValid, true);
+#endif
+      }
+      drawRuntimePowerPauseOverlay(idleState, true);
+      lastOverlayState = idleState;
+    }
+
     if (now - lastDisplayUpdate >= DISPLAY_PRESSURE_INTERVAL_MS) {
       lastDisplayUpdate = now;
-      drawRuntimeTarget(targetPsi, smoothedPressure, displayValid);
-      drawRuntimeTemperature(currentTemperatureC);
-      drawRuntimeMotorPower(getMotorSpeedSafe());
+      if (idleState == IDLE_STATE_OFF) {
+        drawRuntimeTarget(targetPsi, smoothedPressure, displayValid);
+        drawRuntimeTemperature(currentTemperatureC);
+        drawRuntimeMotorPower(getMotorSpeedSafe());
+      }
 #if DEBUG_DISPLAY_SENSOR_PRESSURE
-  drawRuntimeSensorPressureDebug(rawSensorPressure, rawSensorValue, rawSensorValid);
+      if (idleState == IDLE_STATE_OFF) {
+        drawRuntimeSensorPressureDebug(rawSensorPressure, rawSensorValue, rawSensorValid);
+      }
 #endif
     }
 
     if (now - lastPauseUpdate >= 1000) {
       lastPauseUpdate = now;
-      drawRuntimePauseCountdown(idleSecondsRemaining);
+      if (idleState == IDLE_STATE_OFF) {
+        drawRuntimePauseCountdown(idleSecondsRemaining);
+      }
+    }
+
+    bool warningActive = false;
+    uint32_t warningSeconds = powerPauseWarnSeconds;
+    if (powerPauseBeeperEnabled && idleState == IDLE_STATE_OFF && idleSecondsRemaining != UINT32_MAX) {
+      if (warningSeconds > 0 && idleSecondsRemaining > 0 && idleSecondsRemaining <= warningSeconds) {
+        warningActive = true;
+      }
+    }
+
+    if (warningActive) {
+      uint32_t maxIntervalMs = 1200;
+      uint32_t minIntervalMs = 200;
+      uint32_t span = (warningSeconds > 1) ? (warningSeconds - 1) : 1;
+      uint32_t remaining = (idleSecondsRemaining > 1) ? (idleSecondsRemaining - 1) : 0;
+      if (remaining > span) {
+        remaining = span;
+      }
+      uint32_t intervalMs = minIntervalMs + ((maxIntervalMs - minIntervalMs) * remaining) / span;
+
+      if (now - lastBeeperToggle >= intervalMs) {
+        lastBeeperToggle = now;
+        beeperOutput = !beeperOutput;
+        setBeeper(beeperOutput);
+      }
+    } else {
+      if (beeperOutput) {
+        beeperOutput = false;
+        setBeeper(false);
+      }
+      lastBeeperToggle = now;
+    }
+  } else {
+    if (beeperOutput) {
+      beeperOutput = false;
+      setBeeper(false);
     }
   }
 

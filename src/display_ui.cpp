@@ -1,5 +1,6 @@
 #include "display_ui.h"
 #include "motor_control.h"
+#include "splash_image.h"
 #include <math.h>
 #include <stdint.h>
 
@@ -292,18 +293,21 @@ void updateMinMaxFlash() {
 
 void drawStartupScreen() {
   tft.fillScreen(COLOR_BG);
-  tft.setTextColor(TFT_WHITE, COLOR_BG);
-  tft.setTextSize(3);
-  tft.setCursor(120, 80);
-  tft.println("APOLLO");
-  tft.setCursor(100, 120);
-  tft.println("SPRAYERS");
+  int imageX = (SCREEN_WIDTH - SPLASH_IMAGE_WIDTH) / 2;
+  int imageY = (SCREEN_HEIGHT - SPLASH_IMAGE_HEIGHT) / 2;
+  tft.pushImage(imageX, imageY, SPLASH_IMAGE_WIDTH, SPLASH_IMAGE_HEIGHT, splashImage);
+
+  tft.fillRect(0, 0, SCREEN_WIDTH, 40, TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  tft.setCursor(160, 170);
-  tft.println("HVLP");
-  tft.setTextSize(1);
-  tft.setCursor(175, 220);
-  tft.println("Starting...");
+  tft.setCursor(20, 12);
+  tft.print("Apollo Sprayers");
+
+  tft.fillRect(0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 40, TFT_BLACK);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+  tft.setCursor(20, SCREEN_HEIGHT - 28);
+  tft.print("Initializing...");
 }
 
 void drawMenuFooter(const char* message, uint16_t color) {
@@ -339,7 +343,7 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   tft.setCursor(185, 30);
   tft.print("MENU");
 
-  const char* options[MENU_OPTION_COUNT] = {"Start motor", "Settings", "Firmware version"};
+  const char* options[MENU_OPTION_COUNT] = {"Start motor", "Settings", "Power pause", "Firmware version"};
   for (uint8_t i = 0; i < MENU_OPTION_COUNT; i++) {
     int y = MENU_TOP_Y + (i * MENU_OPTION_HEIGHT);
     if (i == menuIndex) {
@@ -356,17 +360,18 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   drawMenuFooter("Press to select", TFT_GREEN);
 }
 
-void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, bool editing, bool forceRedraw) {
+void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool editing, bool forceRedraw) {
   static uint8_t lastIndex = 255;
   static float lastKp = -1.0f;
   static float lastKi = -1.0f;
   static float lastKd = -1.0f;
   static float lastIdleDev = -1.0f;
+  static float lastStartPsi = -1.0f;
   static bool lastEditing = false;
 
   if (!forceRedraw && lastIndex == settingsIndex && lastEditing == editing &&
       fabsf(kp - lastKp) < 0.01f && fabsf(ki - lastKi) < 0.01f && fabsf(kd - lastKd) < 0.01f &&
-      fabsf(idleDev - lastIdleDev) < 0.01f) {
+      fabsf(idleDev - lastIdleDev) < 0.01f && fabsf(startPsi - lastStartPsi) < 0.01f) {
     return;
   }
 
@@ -376,6 +381,7 @@ void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, flo
   lastKi = ki;
   lastKd = kd;
   lastIdleDev = idleDev;
+  lastStartPsi = startPsi;
 
   tft.fillScreen(COLOR_BG);
   tft.setTextColor(TFT_WHITE, COLOR_BG);
@@ -385,7 +391,7 @@ void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, flo
 
   for (uint8_t i = 0; i < SETTINGS_OPTION_COUNT; i++) {
     bool selected = (i == settingsIndex);
-    drawSettingsRow(i, kp, ki, kd, idleDev, selected, editing);
+    drawSettingsRow(i, kp, ki, kd, idleDev, startPsi, selected, editing);
   }
 
   if (editing) {
@@ -395,8 +401,54 @@ void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, flo
   }
 }
 
-void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, bool selected, bool editing) {
-  const char* options[SETTINGS_OPTION_COUNT] = {"Kp", "Ki", "Kd", "Idle dev", "Save", "Back"};
+void drawPowerPauseSettingsFooter(const char* message, uint16_t color) {
+  tft.fillRect(0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 40, COLOR_BG);
+  if (message != NULL && message[0] != '\0') {
+    tft.setTextColor(color, COLOR_BG);
+    tft.setTextSize(2);
+    tft.setCursor(20, SCREEN_HEIGHT - 30);
+    tft.print(message);
+  }
+}
+
+void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, bool editing, bool forceRedraw) {
+  static uint8_t lastIndex = 255;
+  static uint16_t lastPauseSeconds = 0xFFFF;
+  static bool lastBeeperEnabled = false;
+  static uint16_t lastWarnSeconds = 0xFFFF;
+  static bool lastEditing = false;
+
+  if (!forceRedraw && lastIndex == settingsIndex && lastEditing == editing &&
+      lastPauseSeconds == pauseSeconds && lastBeeperEnabled == beeperEnabled && lastWarnSeconds == warnSeconds) {
+    return;
+  }
+
+  lastIndex = settingsIndex;
+  lastEditing = editing;
+  lastPauseSeconds = pauseSeconds;
+  lastBeeperEnabled = beeperEnabled;
+  lastWarnSeconds = warnSeconds;
+
+  tft.fillScreen(COLOR_BG);
+  tft.setTextColor(TFT_WHITE, COLOR_BG);
+  tft.setTextSize(3);
+  tft.setCursor(110, 20);
+  tft.print("POWER PAUSE");
+
+  for (uint8_t i = 0; i < 5; i++) {
+    bool selected = (i == settingsIndex);
+    drawPowerPauseSettingsRow(i, pauseSeconds, beeperEnabled, warnSeconds, selected, editing);
+  }
+
+  if (editing) {
+    drawPowerPauseSettingsFooter("Rotate to adjust, press to exit", TFT_YELLOW);
+  } else {
+    drawPowerPauseSettingsFooter("Press to edit / select", TFT_GREEN);
+  }
+}
+
+void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, bool selected, bool editing) {
+  const char* options[5] = {"Pause sec", "Warn beeper", "Warn sec", "Save", "Back"};
   int y = SETTINGS_TOP_Y + (settingsIndex * SETTINGS_OPTION_HEIGHT);
   uint16_t bg = COLOR_BG;
   uint16_t fg = TFT_WHITE;
@@ -411,12 +463,41 @@ void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float 
   tft.setCursor(60, y);
   tft.print(options[settingsIndex]);
 
-  if (settingsIndex <= 3) {
+  if (settingsIndex == 0) {
+    tft.setCursor(SCREEN_WIDTH - 140, y);
+    tft.printf("%5u", pauseSeconds);
+  } else if (settingsIndex == 1) {
+    tft.setCursor(SCREEN_WIDTH - 140, y);
+    tft.print(beeperEnabled ? "ON" : "OFF");
+  } else if (settingsIndex == 2) {
+    tft.setCursor(SCREEN_WIDTH - 140, y);
+    tft.printf("%5u", warnSeconds);
+  }
+}
+
+void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool selected, bool editing) {
+  const char* options[SETTINGS_OPTION_COUNT] = {"Kp", "Ki", "Kd", "Idle dev", "Start psi", "Save", "Back"};
+  int y = SETTINGS_TOP_Y + (settingsIndex * SETTINGS_OPTION_HEIGHT);
+  uint16_t bg = COLOR_BG;
+  uint16_t fg = TFT_WHITE;
+  if (selected) {
+    bg = editing ? TFT_YELLOW : TFT_DARKGREY;
+    fg = TFT_BLACK;
+  }
+
+  tft.fillRect(40, y - 5, SCREEN_WIDTH - 80, SETTINGS_OPTION_HEIGHT, bg);
+  tft.setTextColor(fg, bg);
+  tft.setTextSize(2);
+  tft.setCursor(60, y);
+  tft.print(options[settingsIndex]);
+
+  if (settingsIndex <= 4) {
     float value = 0.0f;
     if (settingsIndex == 0) value = kp;
     if (settingsIndex == 1) value = ki;
     if (settingsIndex == 2) value = kd;
     if (settingsIndex == 3) value = idleDev;
+    if (settingsIndex == 4) value = startPsi;
     tft.setCursor(SCREEN_WIDTH - 140, y);
     tft.printf("%5.2f", value);
   }
@@ -593,5 +674,38 @@ void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, 
     char rawStr[24];
     snprintf(rawStr, sizeof(rawStr), "RAW %4.1f %ld", rawPsi, (long)rawValue);
     tft.print(rawStr);
+  }
+}
+
+void drawRuntimePowerPauseOverlay(IdleState idleState, bool forceRedraw) {
+  static IdleState lastState = IDLE_STATE_OFF;
+  if (!forceRedraw && idleState == lastState) {
+    return;
+  }
+  lastState = idleState;
+
+  if (idleState == IDLE_STATE_OFF) {
+    return;
+  }
+
+  const int overlayX = 40;
+  const int overlayY = 90;
+  const int overlayW = SCREEN_WIDTH - (overlayX * 2);
+  const int overlayH = 140;
+
+  tft.fillRect(overlayX, overlayY, overlayW, overlayH, TFT_BLACK);
+  tft.drawRect(overlayX, overlayY, overlayW, overlayH, TFT_WHITE);
+  tft.setTextColor(TFT_RED, TFT_BLACK);
+
+  if (idleState == IDLE_STATE_PID_RAMP) {
+    tft.setTextSize(3);
+    tft.setCursor(overlayX + 20, overlayY + 50);
+    tft.print("Entering PowerPause");
+  } else if (idleState == IDLE_STATE_HOLD) {
+    tft.setTextSize(3);
+    tft.setCursor(overlayX + 15, overlayY + 30);
+    tft.print("Press trigger or turn");
+    tft.setCursor(overlayX + 15, overlayY + 70);
+    tft.print("dial to resume");
   }
 }

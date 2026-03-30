@@ -5,6 +5,8 @@
 
 #include "temp_sensor.h"
 
+#define TEMP_CALIBRATION_OFFSET 39.0f  // Adjust this offset based on calibration
+
 int analogRead(unsigned char pin);
 
 void tempSensorInit(void) {

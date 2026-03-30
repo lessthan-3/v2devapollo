@@ -32,25 +32,44 @@ extern TFT_eSPI tft;
 #define MENU_OPTION_HEIGHT  40
 #define MENU_TOP_Y          90
 
-// Settings
-#define SETTINGS_OPTION_COUNT 7
-#define SETTINGS_OPTION_HEIGHT 36
-#define SETTINGS_TOP_Y      70
+// Settings - Updated for new structure
+#define SETTINGS_OPTION_COUNT 4
+#define SETTINGS_OPTION_HEIGHT 40
+#define SETTINGS_TOP_Y      85
 
 #define MINMAX_FLASH_MS     500
 
 // Temporary debug toggle for raw sensor pressure display
 // #define DEBUG_DISPLAY_SENSOR_PRESSURE 1
 
-// Colors
-#define COLOR_TARGET        TFT_YELLOW
-#define COLOR_CURRENT       TFT_CYAN
-#define COLOR_LABEL         TFT_WHITE
-#define COLOR_MINMAX        TFT_RED
-#define COLOR_TEMP          TFT_ORANGE
-#define COLOR_RUNTIME       TFT_GREEN
-#define COLOR_DEBUG         TFT_MAGENTA
-#define COLOR_BG            TFT_BLACK
+// ===== COLOR THEME DEFINITIONS =====
+// Centralized color management for easy theme adjustments
+#define COLOR_BG                TFT_BLACK      // Background color
+#define COLOR_TEXT_PRIMARY      TFT_WHITE      // Primary text color
+#define COLOR_TEXT_SECONDARY    TFT_LIGHTGREY  // Secondary text color
+
+// Target pressure indicator colors
+#define COLOR_TARGET_ACTIVE     TFT_GREEN      // Target PSI in range
+#define COLOR_TARGET_OUTRANGE   TFT_RED        // Target PSI out of range
+#define COLOR_TARGET_INACTIVE   TFT_YELLOW     // Target PSI (motor off)
+
+// Status and indicator colors
+#define COLOR_CURRENT           TFT_CYAN       // Current pressure value
+#define COLOR_TEMP              TFT_ORANGE     // Temperature display
+#define COLOR_TEMP_WARNING      TFT_RED        // Temperature warning
+#define COLOR_RUNTIME           TFT_GREEN      // Runtime/job time
+#define COLOR_WARNING           TFT_ORANGE     // Warning state
+#define COLOR_ERROR             TFT_RED        // Error state
+#define COLOR_SUCCESS           TFT_GREEN      // Success state
+
+// UI element colors
+#define COLOR_LABEL             TFT_WHITE      // Labels
+#define COLOR_MINMAX            TFT_RED        // Min/Max flash
+#define COLOR_DEBUG             TFT_MAGENTA    // Debug info
+#define COLOR_OVERLAY_BG        TFT_BLACK      // Overlay background
+#define COLOR_OVERLAY_BORDER    TFT_WHITE      // Overlay border
+#define COLOR_MENU_SELECT       TFT_DARKGREY   // Menu selection
+#define COLOR_MENU_EDIT         TFT_YELLOW     // Menu editing mode
 
 typedef enum {
 	MODE_TARGET_PRESSURE = 0,
@@ -60,31 +79,35 @@ typedef enum {
 	MODE_COUNT
 } EncoderMode;
 
-void drawStaticUI();
-void drawTargetPressure(bool forceRedraw = false);
-void drawCurrentPressure(float psi, bool valid);
-void drawTemperature(float tempC);
-void drawDebugInfo();
+typedef enum {
+  UNITS_IMPERIAL = 0,  // PSI, Fahrenheit
+  UNITS_METRIC = 1     // mbar, Celsius
+} DisplayUnits;
+
+// Old UI functions (removed - using new design)
+// void drawStaticUI();
+// void drawTargetPressure(bool forceRedraw = false);
+// void drawCurrentPressure(float psi, bool valid);
+// void drawTemperature(float tempC);
+// void drawDebugInfo();
 void drawModeIndicator();
 const char* getModeName(EncoderMode mode);
-void flashMinMax(bool isMin);
-void updateMinMaxFlash();
 void drawStartupScreen();
 void drawMenuScreen(uint8_t menuIndex, bool forceRedraw = false);
 void drawMenuFooter(const char* message, uint16_t color);
-void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool editing, bool forceRedraw = false);
 void drawSettingsFooter(const char* message, uint16_t color);
 void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool selected, bool editing);
-void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, bool editing, bool forceRedraw = false);
+void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, DisplayUnits units, bool editing, bool forceRedraw = false);
 void drawPowerPauseSettingsFooter(const char* message, uint16_t color);
-void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, bool selected, bool editing);
-void drawRuntimeStatic();
-void drawRuntimeTarget(float target, float current, bool valid, bool forceRedraw = false);
-void drawRuntimeTemperature(float tempC, bool forceRedraw = false);
-void drawRuntimePauseCountdown(uint32_t secondsRemaining, bool forceRedraw = false);
-void drawRuntimeFooter();
-void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw = false);
+void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, DisplayUnits units, bool selected, bool editing);
+void drawRuntimeStatic(DisplayUnits units);
+void drawRuntimeTarget(float target, float current, DisplayUnits units, bool valid, bool forceRedraw = false);
+void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw = false);
+void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw = false);
 void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, bool forceRedraw = false);
-void drawRuntimePowerPauseOverlay(IdleState idleState, bool forceRedraw = false);
+void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining, bool forceRedraw = false);
+void drawRuntimeOverTempOverlay(float tempC, bool forceRedraw = false);
+void drawSupportScreen();
+void drawAboutScreen(uint32_t totalRuntimeTenths, const char* firmwareVersion);
 
 #endif

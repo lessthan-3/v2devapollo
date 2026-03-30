@@ -157,7 +157,8 @@ void motorControlTask(void *parameter) {
             
             bool inActiveBand = fabsf(smoothedPressure - target) <= idleEntryDeviation;
             if (idleState == IDLE_STATE_OFF) {
-                if (inActiveBand) {
+                // Only count idle ticks when target PSI is above minimum (not at 0 in menu)
+                if (inActiveBand && target > 0.0f) {
                     if (idleCounter < idleEntryLoops) {
                         idleCounter++;
                     }

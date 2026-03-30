@@ -41,6 +41,9 @@ Preferences preferences;
 #define DISPLAY_DEBUG_INTERVAL_MS     500   // Update debug info at 2Hz
 #define SERIAL_DEBUG_INTERVAL_MS      1000  // Serial output at 1Hz
 
+// Debug serial output control
+#define DEBUG_SERIAL_OUTPUT           1     // Set to 1 to enable, 0 to disable
+
 // Temperature sensor polling and limits
 #define TEMP_READ_INTERVAL_MS  1000   // Temperature update interval
 #define TEMP_OVERHEAT_SETPOINT 115.0f // Overtemperature shutdown setpoint
@@ -75,12 +78,10 @@ Preferences preferences;
 #define IDLE_DEV_MAX        2.0f
 
 // Power pause settings
-#define POWER_PAUSE_SEC_MIN 0
+#define POWER_PAUSE_SEC_MIN 20
 #define POWER_PAUSE_SEC_MAX 600
 #define POWER_PAUSE_SEC_STEP 1
-#define POWER_PAUSE_WARN_SEC_MIN 0
-#define POWER_PAUSE_WARN_SEC_MAX 600
-#define POWER_PAUSE_WARN_SEC_STEP 1
+#define POWER_PAUSE_WARN_SEC 10  // Fixed warning time
 
 // Screen state enumeration
 typedef enum {
@@ -88,7 +89,9 @@ typedef enum {
   SCREEN_MENU,
   SCREEN_RUNTIME,
   SCREEN_SETTINGS,
-  SCREEN_POWERPAUSE_SETTINGS
+  SCREEN_POWERPAUSE_SETTINGS,
+  SCREEN_SUPPORT,
+  SCREEN_ABOUT
 } ScreenState;
 
 // Global state variables
@@ -100,6 +103,12 @@ bool isMinNotMax = false;
 uint32_t totalRuntimeTenths = 0;      // Total runtime in 0.1 hour increments (persistent)
 uint32_t sessionStartMillis = 0;       // Session start time
 unsigned long lastHourMeterSave = 0;   // Last time we saved hour meter
+
+// Job time tracking (resets when motor starts)
+uint32_t jobStartMillis = 0;           // Job start time
+uint32_t jobElapsedMillis = 0;         // Total job elapsed time (excludes power pause)
+uint32_t jobPauseStartMillis = 0;      // When current pause started
+bool jobTimerActive = false;           // Whether job timer is running
 
 // Screen/menu state
 ScreenState currentScreen = SCREEN_STARTUP;
@@ -125,7 +134,8 @@ uint8_t powerPauseIndex = 0;
 bool powerPauseEditing = false;
 uint16_t powerPauseSeconds = IDLE_ENTRY_SECONDS;
 bool powerPauseBeeperEnabled = true;
-uint16_t powerPauseWarnSeconds = 5;
+const uint16_t powerPauseWarnSeconds = POWER_PAUSE_WARN_SEC;  // Fixed at 10 seconds
+DisplayUnits displayUnits = UNITS_IMPERIAL;
 bool powerPauseDirty = false;
 
 // Encoder mode state
@@ -143,11 +153,15 @@ void saveHourMeter();
 void enterMenuScreen();
 void enterRuntimeScreen();
 void enterSettingsScreen();
-void enterPowerPauseSettingsScreen();
-void syncPidGainsFromSettings(bool saveToNvs);
+void enterSupportScreen();
+void enterAboutScreen();
+void syncPowerPauseSettings(bool saveToNvs);
 void loadSettings();
 void saveSettings();
-void syncPowerPauseSettings(bool saveToNvs);
+void startJobTimer();
+void pauseJobTimer();
+void resumeJobTimer();
+uint32_t getJobTimeSeconds();
 
 void setup() {
   Serial.begin(115200);
@@ -272,10 +286,10 @@ void setup() {
   
   delay(2000);
   
-  // Startup screen before menu
+  // Startup screen before entering runtime
   delay(1500);
-  enterMenuScreen();
-  Serial.println("Entered menu screen; motor disabled");
+  enterRuntimeScreen();  // Changed from enterMenuScreen()
+  Serial.println("Entered runtime screen; motor starts at 0 PSI");
 }
 
 /**
@@ -309,7 +323,8 @@ void loadSettings() {
     settingsStartPsi = preferences.getFloat("startPsi", TARGET_PSI_DEFAULT);
     powerPauseSeconds = preferences.getUShort("idleSec", IDLE_ENTRY_SECONDS);
     powerPauseBeeperEnabled = preferences.getBool("warnBeep", true);
-    powerPauseWarnSeconds = preferences.getUShort("warnSec", 5);
+    // powerPauseWarnSeconds is now a constant
+    displayUnits = (DisplayUnits)preferences.getUChar("units", UNITS_IMPERIAL);
     preferences.end();
   } else {
     preferences.end();
@@ -317,15 +332,12 @@ void loadSettings() {
     settingsStartPsi = TARGET_PSI_DEFAULT;
     powerPauseSeconds = IDLE_ENTRY_SECONDS;
     powerPauseBeeperEnabled = true;
-    powerPauseWarnSeconds = 5;
+    // powerPauseWarnSeconds is now a constant
   }
   settingsIdleDev = constrain(settingsIdleDev, IDLE_DEV_MIN, IDLE_DEV_MAX);
   settingsStartPsi = constrain(settingsStartPsi, TARGET_PSI_MIN, TARGET_PSI_MAX);
   powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
-  powerPauseWarnSeconds = constrain(powerPauseWarnSeconds, POWER_PAUSE_WARN_SEC_MIN, POWER_PAUSE_WARN_SEC_MAX);
-  if (powerPauseWarnSeconds > powerPauseSeconds) {
-    powerPauseWarnSeconds = powerPauseSeconds;
-  }
+  // powerPauseWarnSeconds is now a constant
   setIdleEntryDeviationSafe(settingsIdleDev);
   setIdleEntrySecondsSafe(powerPauseSeconds);
 }
@@ -336,7 +348,8 @@ void saveSettings() {
     preferences.putFloat("startPsi", settingsStartPsi);
     preferences.putUShort("idleSec", powerPauseSeconds);
     preferences.putBool("warnBeep", powerPauseBeeperEnabled);
-    preferences.putUShort("warnSec", powerPauseWarnSeconds);
+    // powerPauseWarnSeconds is now a constant
+    preferences.putUChar("units", (uint8_t)displayUnits);
     preferences.end();
   } else {
     preferences.end();
@@ -369,12 +382,21 @@ void enterMenuScreen() {
 void enterRuntimeScreen() {
   currentScreen = SCREEN_RUNTIME;
   runtimeStartMillis = millis();
+  
+  // Always start at 0 PSI
+  targetPsi = 0.0f;
+  setTargetPressureSafe(targetPsi);
+  encoder.setCount(0);
+  lastEncoderCount = encoder.getCount();
+  
+  // Start job timer
+  startJobTimer();
 
   setMotorEnabledSafe(true);
   if (overTempActive) {
     setMotorEnabledSafe(false);
   }
-  drawRuntimeStatic();
+  drawRuntimeStatic(displayUnits);
   float currentPsi = 0.0f;
   bool pressureValid = false;
   uint32_t idleSecondsRemaining = UINT32_MAX;
@@ -383,11 +405,9 @@ void enterRuntimeScreen() {
   pressureValid = motorShared.pressureValid;
   idleSecondsRemaining = motorShared.idleSecondsRemaining;
   portEXIT_CRITICAL(&motorShared.mutex);
-  drawRuntimeTarget(targetPsi, currentPsi, pressureValid, true);
-  drawRuntimeTemperature(currentTemperatureC, true);
-  drawRuntimePauseCountdown(idleSecondsRemaining, true);
-  drawRuntimeFooter();
-  drawRuntimeMotorPower(getMotorSpeedSafe(), true);
+  drawRuntimeTarget(targetPsi, currentPsi, displayUnits, pressureValid, true);
+  drawRuntimeJobTime(0, true);
+  drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
 #if DEBUG_DISPLAY_SENSOR_PRESSURE
   float rawPsi = 0.0f;
   int32_t rawValue = 0;
@@ -404,34 +424,70 @@ void enterSettingsScreen() {
   settingsIndex = 0;
   settingsScrollAccumulator = 0;
 
-  PidController* pid = getPressurePid();
-  pidGetGains(pid, &settingsKp, &settingsKi, &settingsKd);
-  settingsIdleDev = getIdleEntryDeviationSafe();
+  // Load current power pause settings
+  powerPauseSeconds = getIdleEntrySecondsSafe();
+  powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
 
   encoder.setCount(settingsIndex);
   lastEncoderCount = encoder.getCount();
 
-  drawSettingsScreen(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, settingsEditing, true);
+  drawPowerPauseSettingsScreen(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, settingsEditing, true);
 }
 
-void enterPowerPauseSettingsScreen() {
-  currentScreen = SCREEN_POWERPAUSE_SETTINGS;
-  powerPauseEditing = false;
-  powerPauseDirty = false;
-  powerPauseIndex = 0;
-  powerPauseScrollAccumulator = 0;
-
-  powerPauseSeconds = getIdleEntrySecondsSafe();
-  powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
-  powerPauseWarnSeconds = constrain(powerPauseWarnSeconds, POWER_PAUSE_WARN_SEC_MIN, POWER_PAUSE_WARN_SEC_MAX);
-  if (powerPauseWarnSeconds > powerPauseSeconds) {
-    powerPauseWarnSeconds = powerPauseSeconds;
-  }
-
-  encoder.setCount(powerPauseIndex);
+void enterSupportScreen() {
+  currentScreen = SCREEN_SUPPORT;
+  encoder.setCount(0);
   lastEncoderCount = encoder.getCount();
+  drawSupportScreen();
+}
 
-  drawPowerPauseSettingsScreen(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, powerPauseEditing, true);
+void enterAboutScreen() {
+  currentScreen = SCREEN_ABOUT;
+  encoder.setCount(0);
+  lastEncoderCount = encoder.getCount();
+  drawAboutScreen(totalRuntimeTenths, FIRMWARE_VERSION);
+}
+
+// Job timer functions
+void startJobTimer() {
+  jobStartMillis = millis();
+  jobElapsedMillis = 0;
+  jobPauseStartMillis = 0;
+  jobTimerActive = true;
+}
+
+void pauseJobTimer() {
+  if (jobTimerActive && jobPauseStartMillis == 0) {
+    jobPauseStartMillis = millis();
+  }
+}
+
+void resumeJobTimer() {
+  if (jobPauseStartMillis > 0) {
+    // Add the paused time to elapsed
+    uint32_t pauseDuration = millis() - jobPauseStartMillis;
+    jobElapsedMillis += pauseDuration;
+    jobPauseStartMillis = 0;
+  }
+}
+
+uint32_t getJobTimeSeconds() {
+  if (!jobTimerActive) {
+    return 0;
+  }
+  
+  uint32_t currentMillis = millis();
+  uint32_t totalElapsed;
+  
+  if (jobPauseStartMillis > 0) {
+    // Currently paused - don't count time since pause started
+    totalElapsed = jobPauseStartMillis - jobStartMillis - jobElapsedMillis;
+  } else {
+    // Running - count all time except previous pauses
+    totalElapsed = currentMillis - jobStartMillis - jobElapsedMillis;
+  }
+  
+  return totalElapsed / 1000;
 }
 
 void syncPidGainsFromSettings(bool saveToNvs) {
@@ -451,10 +507,6 @@ void syncPidGainsFromSettings(bool saveToNvs) {
 
 void syncPowerPauseSettings(bool saveToNvs) {
   powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
-  powerPauseWarnSeconds = constrain(powerPauseWarnSeconds, POWER_PAUSE_WARN_SEC_MIN, POWER_PAUSE_WARN_SEC_MAX);
-  if (powerPauseWarnSeconds > powerPauseSeconds) {
-    powerPauseWarnSeconds = powerPauseSeconds;
-  }
 
   setIdleEntrySecondsSafe(powerPauseSeconds);
 
@@ -530,40 +582,44 @@ void loop() {
     } else if (currentScreen == SCREEN_RUNTIME) {
       if (idleState != IDLE_STATE_OFF) {
         requestIdleExitSafe();
+        resumeJobTimer();  // Resume job timer when exiting power pause
       }
       float newTarget = targetPsi + (delta * TARGET_PSI_STEP);
       if (newTarget < TARGET_PSI_MIN) newTarget = TARGET_PSI_MIN;
       if (newTarget > TARGET_PSI_MAX) newTarget = TARGET_PSI_MAX;
       targetPsi = newTarget;
       setTargetPressureSafe(targetPsi);
-      drawRuntimeTarget(targetPsi, smoothedPressure, displayValid);
+      drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid);
     } else if (currentScreen == SCREEN_SETTINGS) {
       if (settingsEditing) {
-        float step = 0.0f;
-        if (settingsIndex == 0) step = KP_STEP;
-        if (settingsIndex == 1) step = KI_STEP;
-        if (settingsIndex == 2) step = KD_STEP;
-        if (settingsIndex == 3) step = IDLE_DEV_STEP;
-        if (settingsIndex == 4) step = TARGET_PSI_STEP;
-
-        if (step > 0.0f) {
-          float change = (float)delta * step;
-          if (settingsIndex == 0) {
-            settingsKp = constrain(settingsKp + change, KP_MIN, KP_MAX);
-          } else if (settingsIndex == 1) {
-            settingsKi = constrain(settingsKi + change, KI_MIN, KI_MAX);
-          } else if (settingsIndex == 2) {
-            settingsKd = constrain(settingsKd + change, KD_MIN, KD_MAX);
-          } else if (settingsIndex == 3) {
-            settingsIdleDev = constrain(settingsIdleDev + change, IDLE_DEV_MIN, IDLE_DEV_MAX);
-          } else if (settingsIndex == 4) {
-            settingsStartPsi = constrain(settingsStartPsi + change, TARGET_PSI_MIN, TARGET_PSI_MAX);
-          }
+        if (settingsIndex == 0) {
+          int32_t change = (int32_t)delta * POWER_PAUSE_SEC_STEP;
+          int32_t nextValue = (int32_t)powerPauseSeconds + change;
+          powerPauseSeconds = (uint16_t)constrain(nextValue, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
+          // Warning seconds is now a fixed constant
           settingsDirty = true;
-          if (settingsIndex <= 3) {
-            syncPidGainsFromSettings(false);
+          syncPowerPauseSettings(false);
+          drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, true);
+        } else if (settingsIndex == 1) {
+          // Require 2 ticks to toggle to avoid accidental changes
+          static int32_t beeperAccumulator = 0;
+          beeperAccumulator += (int32_t)delta;
+          if (beeperAccumulator >= 2 || beeperAccumulator <= -2) {
+            powerPauseBeeperEnabled = !powerPauseBeeperEnabled;
+            settingsDirty = true;
+            drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, true);
+            beeperAccumulator = 0;  // Reset accumulator
           }
-          drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, true);
+        } else if (settingsIndex == 2) {
+          // Units toggle - require 2 ticks to toggle to avoid accidental changes
+          static int32_t unitsAccumulator = 0;
+          unitsAccumulator += (int32_t)delta;
+          if (unitsAccumulator >= 2 || unitsAccumulator <= -2) {
+            displayUnits = (displayUnits == UNITS_IMPERIAL) ? UNITS_METRIC : UNITS_IMPERIAL;
+            settingsDirty = true;
+            drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, true);
+            unitsAccumulator = 0;  // Reset accumulator
+          }
         }
       } else {
         settingsScrollAccumulator += (int32_t)delta;
@@ -586,8 +642,8 @@ void loop() {
           encoder.setCount(settingsIndex);
           lastEncoderCount = encoder.getCount();
           if (previousIndex != settingsIndex) {
-            drawSettingsRow(previousIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, false, false);
-            drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, false);
+            drawPowerPauseSettingsRow(previousIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, false, false);
+            drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, false);
           }
         }
       }
@@ -597,27 +653,23 @@ void loop() {
           int32_t change = (int32_t)delta * POWER_PAUSE_SEC_STEP;
           int32_t nextValue = (int32_t)powerPauseSeconds + change;
           powerPauseSeconds = (uint16_t)constrain(nextValue, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
-          if (powerPauseWarnSeconds > powerPauseSeconds) {
-            powerPauseWarnSeconds = powerPauseSeconds;
-          }
+          // Warning seconds is now a fixed constant
           powerPauseDirty = true;
           syncPowerPauseSettings(false);
-          drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, true);
+          drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, true);
         } else if (powerPauseIndex == 1) {
           if (delta != 0) {
             powerPauseBeeperEnabled = !powerPauseBeeperEnabled;
             powerPauseDirty = true;
-            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, true);
+            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, true);
           }
         } else if (powerPauseIndex == 2) {
-          int32_t change = (int32_t)delta * POWER_PAUSE_WARN_SEC_STEP;
-          int32_t nextValue = (int32_t)powerPauseWarnSeconds + change;
-          powerPauseWarnSeconds = (uint16_t)constrain(nextValue, POWER_PAUSE_WARN_SEC_MIN, POWER_PAUSE_WARN_SEC_MAX);
-          if (powerPauseWarnSeconds > powerPauseSeconds) {
-            powerPauseWarnSeconds = powerPauseSeconds;
+          // Units selection
+          if (delta != 0) {
+            displayUnits = (displayUnits == UNITS_IMPERIAL) ? UNITS_METRIC : UNITS_IMPERIAL;
+            powerPauseDirty = true;
+            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, true);
           }
-          powerPauseDirty = true;
-          drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, true);
         }
       } else {
         powerPauseScrollAccumulator += (int32_t)delta;
@@ -635,13 +687,13 @@ void loop() {
           uint8_t previousIndex = powerPauseIndex;
           int32_t newIndex = (int32_t)powerPauseIndex + powerPauseSteps;
           if (newIndex < 0) newIndex = 0;
-          if (newIndex > 4) newIndex = 4;
+          if (newIndex > 3) newIndex = 3;
           powerPauseIndex = (uint8_t)newIndex;
           encoder.setCount(powerPauseIndex);
           lastEncoderCount = encoder.getCount();
           if (previousIndex != powerPauseIndex) {
-            drawPowerPauseSettingsRow(previousIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, false, false);
-            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, false);
+            drawPowerPauseSettingsRow(previousIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, false, false);
+            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, false);
           }
         }
       }
@@ -662,55 +714,50 @@ void loop() {
         } else if (menuIndex == 1) {
           enterSettingsScreen();
         } else if (menuIndex == 2) {
-          enterPowerPauseSettingsScreen();
+          enterSupportScreen();
         } else if (menuIndex == 3) {
-          drawMenuFooter("Firmware " FIRMWARE_VERSION, TFT_CYAN);
+          enterAboutScreen();
         }
       } else if (currentScreen == SCREEN_RUNTIME) {
+        // Pause job timer and go to menu
+        pauseJobTimer();
+        setMotorEnabledSafe(false);
         enterMenuScreen();
       } else if (currentScreen == SCREEN_SETTINGS) {
         if (settingsEditing) {
           settingsEditing = false;
-          drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, false);
-          drawSettingsFooter("Press to edit / select", TFT_GREEN);
+          drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, false);
+          drawPowerPauseSettingsFooter("Press to edit / select", COLOR_SUCCESS);
         } else {
-          if (settingsIndex <= 4) {
+          if (settingsIndex <= 2) {
             settingsEditing = true;
-            drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, true);
-            drawSettingsFooter("Rotate to adjust, press to exit", TFT_YELLOW);
-          } else if (settingsIndex == 5) {
+            drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, true);
+            drawPowerPauseSettingsFooter("Rotate to adjust, press to exit", COLOR_MENU_EDIT);
+          } else if (settingsIndex == 3) {
+            // Exit Settings - save if dirty
             if (settingsDirty) {
-              syncPidGainsFromSettings(true);
-              targetPsi = settingsStartPsi;
-              setTargetPressureSafe(targetPsi);
-              encoder.setCount((int64_t)lroundf(targetPsi / TARGET_PSI_STEP));
-              lastEncoderCount = encoder.getCount();
-              drawSettingsFooter("PID saved", TFT_GREEN);
-            } else {
-              drawSettingsFooter("No changes to save", TFT_ORANGE);
+              syncPowerPauseSettings(true);
             }
-          } else if (settingsIndex == 6) {
             enterMenuScreen();
           }
         }
+      } else if (currentScreen == SCREEN_SUPPORT || currentScreen == SCREEN_ABOUT) {
+        enterMenuScreen();
       } else if (currentScreen == SCREEN_POWERPAUSE_SETTINGS) {
         if (powerPauseEditing) {
           powerPauseEditing = false;
-          drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, false);
+          drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, false);
           drawPowerPauseSettingsFooter("Press to edit / select", TFT_GREEN);
         } else {
           if (powerPauseIndex <= 2) {
             powerPauseEditing = true;
-            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, true, true);
+            drawPowerPauseSettingsRow(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, displayUnits, true, true);
             drawPowerPauseSettingsFooter("Rotate to adjust, press to exit", TFT_YELLOW);
           } else if (powerPauseIndex == 3) {
+            // Exit - save if dirty
             if (powerPauseDirty) {
               syncPowerPauseSettings(true);
-              drawPowerPauseSettingsFooter("Settings saved", TFT_GREEN);
-            } else {
-              drawPowerPauseSettingsFooter("No changes to save", TFT_ORANGE);
             }
-          } else if (powerPauseIndex == 4) {
             enterMenuScreen();
           }
         }
@@ -720,12 +767,41 @@ void loop() {
 
   unsigned long now = millis();
 
+#if DEBUG_SERIAL_OUTPUT
+  // Debug serial output - runs in display loop using safe functions
+  static unsigned long lastSerialDebug = 0;
+  if (now - lastSerialDebug >= SERIAL_DEBUG_INTERVAL_MS) {
+    lastSerialDebug = now;
+    
+    // Read shared data safely
+    float currentPsi;
+    uint32_t powerPauseTicks;
+    {
+      portENTER_CRITICAL(&motorShared.mutex);
+      currentPsi = motorShared.smoothedPsi;
+      powerPauseTicks = motorShared.idleSecondsRemaining;
+      portEXIT_CRITICAL(&motorShared.mutex);
+    }
+    
+    // Print to serial
+    Serial.print("[DEBUG] PSI: ");
+    Serial.print(currentPsi, 2);
+    Serial.print(" | Power Pause Ticks: ");
+    if (powerPauseTicks == UINT32_MAX) {
+      Serial.println("N/A (not active)");
+    } else {
+      Serial.print(powerPauseTicks);
+      Serial.println(" sec");
+    }
+  }
+#endif
+
   if (now - lastTempRead >= TEMP_READ_INTERVAL_MS) {
     //toggleBeeper();  // Toggle beeper state for testing
     lastTempRead = now;
     uint16_t tempAdc = tempSensorReadAdc();
-    currentTemperatureC = ((float)tempAdc - (float)TEMP_OFFSET) * (float)TEMP_MULT / (float)TEMP_DIVISOR;
-    //Serial.printf("Temp ADC=%u, C=%.2f, pin=%u\n", tempAdc, currentTemperatureC, (unsigned)TEMP_SENSOR_PIN);
+    currentTemperatureC = -1.75f * (float)tempAdc  + 207.0f; 
+
 
     if (currentTemperatureC > TEMP_OVERHEAT_SETPOINT) {
       if (!overTempActive) {
@@ -744,41 +820,89 @@ void loop() {
   }
 
   if (currentScreen == SCREEN_RUNTIME) {
+    // Handle job timer pause/resume based on idle state
+    static IdleState lastIdleState = IDLE_STATE_OFF;
+    static uint32_t idleHoldEntryTime = 0;  // Track when idle hold state started
+    
+    if (idleState != lastIdleState) {
+      if (idleState != IDLE_STATE_OFF && lastIdleState == IDLE_STATE_OFF) {
+        pauseJobTimer();
+      } else if (idleState == IDLE_STATE_OFF && lastIdleState != IDLE_STATE_OFF) {
+        resumeJobTimer();
+      }
+      
+      // Track when we enter idle hold state
+      if (idleState == IDLE_STATE_HOLD && lastIdleState != IDLE_STATE_HOLD) {
+        idleHoldEntryTime = millis();
+      }
+      
+      lastIdleState = idleState;
+    }
+    
+    // Handle idle state changes and overlays
     if (idleState != lastOverlayState) {
       if (idleState == IDLE_STATE_OFF) {
-        drawRuntimeStatic();
-        drawRuntimeTarget(targetPsi, smoothedPressure, displayValid, true);
-        drawRuntimeTemperature(currentTemperatureC, true);
-        drawRuntimePauseCountdown(idleSecondsRemaining, true);
-        drawRuntimeFooter();
-        drawRuntimeMotorPower(getMotorSpeedSafe(), true);
+        drawRuntimeStatic(displayUnits);
+        drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true);
+        drawRuntimeJobTime(getJobTimeSeconds(), true);
+        drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
 #if DEBUG_DISPLAY_SENSOR_PRESSURE
         drawRuntimeSensorPressureDebug(rawSensorPressure, rawSensorValue, rawSensorValid, true);
 #endif
       }
-      drawRuntimePowerPauseOverlay(idleState, true);
       lastOverlayState = idleState;
+    }
+    
+    // Show appropriate overlay (update every cycle when active)
+    if (overTempActive) {
+      drawRuntimeOverTempOverlay(currentTemperatureC, false);
+    } else if (idleState != IDLE_STATE_OFF) {
+      // Calculate actual timeout remaining
+      uint32_t timeoutRemaining = UINT32_MAX;
+      
+      // When in idle hold state, calculate time remaining until menu timeout
+      if (idleState == IDLE_STATE_HOLD) {
+        uint32_t idleDuration = (millis() - idleHoldEntryTime) / 1000;
+        uint32_t maxIdleTime = 900;  // 15 minutes default
+        
+        if (idleDuration < maxIdleTime) {
+          timeoutRemaining = maxIdleTime - idleDuration;
+        } else {
+          timeoutRemaining = 0;
+        }
+      }
+      
+      drawRuntimePowerPauseOverlay(idleState, timeoutRemaining, false);
+    }
+    
+    // Check if power pause has timed out (10 minutes default)
+    if (idleState == IDLE_STATE_HOLD) {
+      uint32_t idleDuration = (millis() - idleHoldEntryTime) / 1000;
+      uint32_t maxIdleTime = 600;  // 10 minutes default
+      
+      if (idleDuration >= maxIdleTime) {
+        // Timeout - exit to menu
+        pauseJobTimer();
+        setMotorEnabledSafe(false);
+        requestPidReset();
+        enterMenuScreen();
+        Serial.println("Power pause timeout - returned to menu");
+        return;  // Early return to prevent further processing
+      }
     }
 
     if (now - lastDisplayUpdate >= DISPLAY_PRESSURE_INTERVAL_MS) {
       lastDisplayUpdate = now;
-      if (idleState == IDLE_STATE_OFF) {
-        drawRuntimeTarget(targetPsi, smoothedPressure, displayValid);
-        drawRuntimeTemperature(currentTemperatureC);
-        drawRuntimeMotorPower(getMotorSpeedSafe());
+      if (idleState == IDLE_STATE_OFF && !overTempActive) {
+        drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid);
+        drawRuntimeJobTime(getJobTimeSeconds());
+        drawRuntimeTemperature(currentTemperatureC, displayUnits);
       }
 #if DEBUG_DISPLAY_SENSOR_PRESSURE
-      if (idleState == IDLE_STATE_OFF) {
+      if (idleState == IDLE_STATE_OFF && !overTempActive) {
         drawRuntimeSensorPressureDebug(rawSensorPressure, rawSensorValue, rawSensorValid);
       }
 #endif
-    }
-
-    if (now - lastPauseUpdate >= 1000) {
-      lastPauseUpdate = now;
-      if (idleState == IDLE_STATE_OFF) {
-        drawRuntimePauseCountdown(idleSecondsRemaining);
-      }
     }
 
     bool warningActive = false;

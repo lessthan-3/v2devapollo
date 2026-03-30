@@ -84,10 +84,11 @@ void IRAM_ATTR zeroCrossingISR() {
  * Called when delay timer expires - time to fire the triac
  */
 void IRAM_ATTR triacTimerISR() {
-    // if (!motorState.motorEnabled || motorState.motorSpeed == 0) {
-    //     timerAlarmDisable(triacTimer);
-    //     return;
-    // }
+    // Safety check: don't fire if motor is disabled or speed is 0
+    if (!motorState.motorEnabled || motorState.motorSpeed == 0) {
+        timerAlarmDisable(triacTimer);
+        return;
+    }
     // Fire the triac with a short pulse
     digitalWrite(TRIAC_GATE_PIN, HIGH);
     delayMicroseconds(TRIAC_PULSE_US);
@@ -182,6 +183,10 @@ void setMotorSpeed(uint16_t speed) {
     // Speed 1000 = min delay (full power)
     if (speed == 0) {
         motorState.motorPwm = motorState.maxDelay;
+        // Explicitly disable the timer alarm to prevent any firing
+        if (triacTimer != NULL) {
+            timerAlarmDisable(triacTimer);
+        }
     } else {
         uint32_t speedDelay = (uint32_t)speed * motorState.maxDelay / 1000;
         motorState.motorPwm = (uint16_t)(motorState.maxDelay - speedDelay);

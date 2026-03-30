@@ -18,9 +18,9 @@
 // ============================================================================
 // PID Controller Default Constants
 // ============================================================================
-#define PID_KP_DEFAULT      4.0f    // Default proportional gain (reduced)
-#define PID_KI_DEFAULT      2.0f    // Default integral gain (reduced)
-#define PID_KD_DEFAULT      2.0f    // Default derivative gain (reduced)
+#define PID_KP_DEFAULT      8.0f    // Default proportional gain (reduced)
+#define PID_KI_DEFAULT      3.0f    // Default integral gain (reduced)
+#define PID_KD_DEFAULT      1.0f    // Default derivative gain (reduced)
 
 // PID Output Limits
 #define PID_OUTPUT_MIN      -1000.0f // Minimum PID output (motor speed adjustment)

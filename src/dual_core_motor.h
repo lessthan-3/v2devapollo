@@ -22,8 +22,8 @@
 
 // Idle / power pause behavior
 #define IDLE_ENTRY_SECONDS          20    // Default seconds of stable pressure before idle
-#define IDLE_ENTRY_DEVIATION_PSI    0.3f  // Allowed deviation from target to count as stable
-#define IDLE_ENTRY_DECREASE         200     // Counter decrease rate when outside band
+#define IDLE_ENTRY_DEVIATION_PSI    0.20f  // Allowed deviation from target to count as stable
+#define IDLE_ENTRY_DECREASE         500     // Counter decrease rate when outside band
 #define IDLE_TARGET_PSI             2.5f  // Idle pressure target
 #define IDLE_STABLE_SECONDS         2     // Seconds at idle target before holding speed
 #define IDLE_STABLE_BAND_PSI        0.15f // Allowed deviation at idle target for stability

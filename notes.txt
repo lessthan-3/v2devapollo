@@ -1,0 +1,68 @@
+going forward
+
+ We do not need any Power Pause indicators other than the warning beeps that begin 10 seconds before the system goes into Power Pause. We decided to keep the motor temperature visible to the user on the home screen (“Run/Set” screen).
+We understand that the run pressure and set pressure will be the same, since we expect the run pressure to catch up very quickly to the set pressure.
+We want the turbine to start at 0.0 PSI. From there, the user can turn the dial to set the pressure to whatever they want. The turbine should always start at 0.0 PSI.
+If there is room, I agree that the first menu item should be “Start Motor.” That way, the user does not have to scroll all the way to the bottom of the menu to return to spraying. This would mainly help if they accidentally enter the menu.
+We also discussed not needing a hidden menu, since we want to be able to access the PCB through Wi-Fi from the factory. If we can access the PCB data through the web app at our factory, then there would not really be a need for a secret menu. Let me know if you disagree.
+I do not think there needs to be any other indicator for Power Pause, because 99.9% of the time the user is not near the system when it goes into Power Pause. They really only need to hear the beeps as an alert. I think the shrinking bar would just take up more space on the main screen without serving much purpose for the user.
+
+
+
+Features to add:
+    Job Time, this should be the time the current run screen has been active
+
+Behavior Changes:
+    Motor should always start at 0 PSI 
+    The first screen after the loading splash should be the runtime screen 
+    If the motor has been in power pause for 15 minutes it should exit to the Menu UI and pause the motor
+
+
+RunTime UI:
+    Change RunTime UI to be top 2/3rds is the Target PSI
+        Bottom Bar should be split with job time on the left and temperature on the right
+    Overall the UI should now be top 2/3rds is the Target PSI and bottom 1/3rd is job time and temperature with no other statisitics 
+
+Menu UI 
+    Should have the following list
+    
+        Start Motor,
+        Settings,
+        SUPPORT,
+        About,
+
+
+    The Settings page should lead to a sub menu that has the options
+        Power Pause Timeout: Number (Seconds)
+        Power Pause Warning Sounds: True/False 
+        Power Pause Warning Time: Number (Seconds)
+        Temperature Warning Threshold: Number (F)
+        Temperature Exit Threshold: Number (F)
+        Exit Settings 
+
+        The implementation for most of these options should already exist but make sure the UI has space for at least 2 more settings options
+        we could split the settings into 2 columns to have more space
+
+    SUPPORT page should lead to a new page that has a text box that i can fill out later and a prompt that says click to return
+
+    ABOUT page should display the current firmware version and the total motor run time
+
+Pause UI 
+    When the motor is in power pause we should have a UI that says press trigger or turn dial to start motor as well as a timer that counts down to the exit,
+    This is currently a popup but it might be better to have it be its own screen to make the UI more consistent
+
+Overtemp UI
+    Similar to pause UI but says the "Motor is too hot, check filter" And then a display of the current temperature 
+
+
+While making these changes lets try to make the UI as polished as possible and increase the resolution of the numbers when we scale them to be larger
+Make sure that as much of the screen space is optimized on the runtime menu 
+        
+
+Make sure that color themeing is kept in global header definitions so color themes can easily be adjusted
+Make sure to ask questions when unsure about implementation details
+Remove unused code when making changes
+Make modular UI elements
+Follow senior engineer practices
+
+

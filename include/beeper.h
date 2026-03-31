@@ -2,8 +2,10 @@
 #define BEEPER_H
 
 #include <Arduino.h>
+#include "config.h"
 
-#define BEEPER_PIN 4
+// Module-local pin alias (from config.h)
+#define BEEPER_PIN  PIN_BEEPER
 
 void beeperInit();
 void setBeeper(bool enabled);

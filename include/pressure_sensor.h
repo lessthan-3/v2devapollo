@@ -16,19 +16,17 @@
 
 #include <Arduino.h>
 #include <Wire.h>
+#include "config.h"
 
-// Pin definitions
-#define PRESSURE_CSB_PIN    19  // Chip select - HIGH/floating for I2C, LOW for SPI
-#define PRESSURE_SDA_PIN    17  // I2C Data
-#define PRESSURE_SCL_PIN    18  // I2C Clock
-
-// I2C Configuration
-#define PRESSURE_I2C_ADDR   0x6D  // 7-bit address: 1101101
+// Module-local pin aliases (from config.h)
+#define PRESSURE_CSB_PIN    PIN_PRESSURE_CSB
+#define PRESSURE_SDA_PIN    PIN_PRESSURE_SDA
+#define PRESSURE_SCL_PIN    PIN_PRESSURE_SCL
 
 // Register definitions
 #define REG_STATUS          0x02  // Status register (bit0 = conversion complete)
 #define REG_PRESSURE_MSB    0x06  // Pressure output MSB
-#define REG_PRESSURE_CSB    0x07  // Pressure output CSB
+#define REG_PRESSURE_CSB    0x07  // Pressure output CSB (register, not the chip-select pin)
 #define REG_PRESSURE_LSB    0x08  // Pressure output LSB
 #define REG_CMD             0x30  // Command register
 
@@ -39,26 +37,11 @@
 #define CMD_INTERVAL_125MS      0x2B  // 125ms interval output
 #define CMD_INTERVAL_1S         0xFB  // 1 second interval output
 
-// Pressure calculation constants
-#define PRESSURE_ZERO_POINT     8388608   // 2^23 - zero condition
-#define PRESSURE_FULL_SCALE     8388608.0f // Divisor for normalization
-#define PRESSURE_24BIT_MAX      16777216  // 2^24 or the number found from testing
-#define PRESSURE_23BIT_MAX      8388608   // 2^23 or the number found from testing
-
-
-#define PRESSURE_BAR_TO_PSI    14.5038f  // Conversion factor from Bar to PSI
-#define PRESSURE_MULTI        2 //multiplier for unit
-
-// Sensor range: 2BG = 2 Bar Gauge
-// 2 Bar = ~29.0075 PSI
-#define PRESSURE_RANGE_BAR      2.0f
-#define PRESSURE_RANGE_PSI      73.5f
-
-// Conversion timeout
-#define CONVERSION_TIMEOUT_MS   100
-
 // Status flags
 #define STATUS_CONVERSION_DONE  0x01
+
+// Timeout alias
+#define CONVERSION_TIMEOUT_MS   PRESSURE_CONVERSION_TIMEOUT_MS
 
 /**
  * @brief Pressure sensor reading result

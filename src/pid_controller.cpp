@@ -240,15 +240,3 @@ void pidDebugPrint(PidController *pid) {
     Serial.printf("  Stored in NVS: %s\n", pid->hasStoredParams ? "YES" : "NO");
     Serial.println("-----------------------------");
 }
-
-// Legacy compatibility stubs
-void pidEnableLearning(PidController *pid, bool enable) {
-    (void)pid;
-    (void)enable;
-    // No-op - learning removed
-}
-
-bool pidIsLearningEnabled(PidController *pid) {
-    (void)pid;
-    return false;  // Learning removed
-}

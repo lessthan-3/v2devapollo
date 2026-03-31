@@ -10,25 +10,7 @@
 #define DUAL_CORE_MOTOR_H
 
 #include <Arduino.h>
-
-// Core assignments
-#define MOTOR_CONTROL_CORE  0   // Core 0 for time-critical motor control
-#define DISPLAY_CORE        1   // Core 1 for display (Arduino default)
-
-// Motor control task parameters
-#define MOTOR_TASK_STACK_SIZE   4096    // Stack size in bytes
-#define MOTOR_TASK_PRIORITY     2       // Higher priority than display
-#define MOTOR_LOOP_INTERVAL_US  5000    // 5ms loop interval (200Hz)
-
-// Idle / power pause behavior
-#define IDLE_ENTRY_SECONDS          20    // Default seconds of stable pressure before idle
-#define IDLE_ENTRY_DEVIATION_PSI    0.3f  // Allowed deviation from target to count as stable
-#define IDLE_ENTRY_DECREASE         200     // Counter decrease rate when outside band
-#define IDLE_TARGET_PSI             2.5f  // Idle pressure target
-#define IDLE_STABLE_SECONDS         2     // Seconds at idle target before holding speed
-#define IDLE_STABLE_BAND_PSI        0.15f // Allowed deviation at idle target for stability
-#define IDLE_EXIT_DROP_PSI          0.2f  // Pressure drop below idle target to exit
-#define IDLE_MIN_HOLD_SPEED         50     // Minimum motor speed to hold in idle (0-1000 scale)
+#include "config.h"
 
 typedef enum {
     IDLE_STATE_OFF = 0,

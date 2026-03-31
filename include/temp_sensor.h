@@ -7,14 +7,10 @@
 #define TEMP_SENSOR_H
 
 #include <stdint.h>
+#include "config.h"
 
-// Temperature sensor pin
-#define TEMP_SENSOR_PIN 3  // IO38 - Temperature Sensor (1-Wire treated as ADC)
-
-// Temperature conversion constants
-#define TEMP_MULT    -87
-#define TEMP_DIVISOR 200
-#define TEMP_OFFSET  210
+// Module-local pin alias (from config.h)
+#define TEMP_SENSOR_PIN     PIN_TEMP_SENSOR
 
 #ifdef __cplusplus
 extern "C" {

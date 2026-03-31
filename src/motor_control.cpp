@@ -84,10 +84,6 @@ void IRAM_ATTR zeroCrossingISR() {
  * Called when delay timer expires - time to fire the triac
  */
 void IRAM_ATTR triacTimerISR() {
-    // if (!motorState.motorEnabled || motorState.motorSpeed == 0) {
-    //     timerAlarmDisable(triacTimer);
-    //     return;
-    // }
     // Fire the triac with a short pulse
     digitalWrite(TRIAC_GATE_PIN, HIGH);
     delayMicroseconds(TRIAC_PULSE_US);
@@ -377,12 +373,4 @@ void resetPressurePid() {
 
 PidController* getPressurePid() {
     return &pressurePid;
-}
-
-void setPidLearning(bool enable) {
-    pidEnableLearning(&pressurePid, enable);
-}
-
-bool isPidLearningEnabled() {
-    return pidIsLearningEnabled(&pressurePid);
 }

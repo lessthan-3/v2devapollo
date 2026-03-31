@@ -14,28 +14,11 @@
 
 #include <Arduino.h>
 #include <Preferences.h>
+#include "config.h"
 
 // ============================================================================
-// PID Controller Default Constants
-// ============================================================================
-#define PID_KP_DEFAULT      4.0f    // Default proportional gain (reduced)
-#define PID_KI_DEFAULT      2.0f    // Default integral gain (reduced)
-#define PID_KD_DEFAULT      2.0f    // Default derivative gain (reduced)
-
-// PID Output Limits
-#define PID_OUTPUT_MIN      -1000.0f // Minimum PID output (motor speed adjustment)
-#define PID_OUTPUT_MAX      1000.0f  // Maximum PID output (motor speed adjustment)
-#define PID_INTEGRAL_MAX    1000.0f  // Anti-windup limit for integral term
-
-// Gain limits
-#define PID_KP_MIN          0.25f
-#define PID_KP_MAX          100.0f
-#define PID_KI_MIN          0.0f
-#define PID_KI_MAX          100.0f
-#define PID_KD_MIN          0.0f
-#define PID_KD_MAX          100.0f
-
 // NVS Storage keys
+// ============================================================================
 #define NVS_NAMESPACE_PID   "pid_cfg"
 #define NVS_KEY_KP          "kp"
 #define NVS_KEY_KI          "ki"
@@ -188,9 +171,5 @@ void pidSetGains(PidController *pid, float kp, float ki, float kd);
  * @param pid Pointer to PID controller structure
  */
 void pidDebugPrint(PidController *pid);
-
-// Legacy compatibility stubs (do nothing)
-void pidEnableLearning(PidController *pid, bool enable);
-bool pidIsLearningEnabled(PidController *pid);
 
 #endif // PID_CONTROLLER_H

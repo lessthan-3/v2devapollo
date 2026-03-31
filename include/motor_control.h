@@ -14,25 +14,16 @@
 
 #include <Arduino.h>
 #include "pid_controller.h"
+#include "config.h"
 
-// Pin definitions
-#define TRIAC_GATE_PIN      2   // IO2 - Triac Gate Control
-#define ZERO_CROSSING_PIN   20  // IO20 - Zero Crossing Detection
+// Module-local aliases for config pin names
+#define TRIAC_GATE_PIN      PIN_TRIAC_GATE
+#define ZERO_CROSSING_PIN   PIN_ZERO_CROSSING
 
-// Timing constants for 60Hz AC (half cycle = 8.333ms)
-#define MAXDELAY_60HZ       8000    // Maximum delay in microseconds for 60Hz
-#define MAXDELAY_50HZ       9600    // Maximum delay in microseconds for 50Hz
-#define MINDELAY            500     // Minimum delay to ensure triac fires
-
-// Simulated zero crossing (compile-time option)
-// Enable with build flag: -DSIMULATE_AC_60HZ
-#define SIMULATED_ZC_HALF_CYCLE_US  8333  // 60Hz half-cycle period
-
-// Triac gate pulse width
-#define TRIAC_PULSE_US      100     // Gate pulse duration in microseconds
-
-// Debug reporting interval
-#define DEBUG_REPORT_INTERVAL_MS  3000  // Report ZC count every 3 seconds
+// Module-local aliases for timing constants
+#define MAXDELAY_60HZ       TRIAC_MAXDELAY_60HZ
+#define MAXDELAY_50HZ       TRIAC_MAXDELAY_50HZ
+#define MINDELAY            TRIAC_MINDELAY
 
 // Enable serial triac diagnostics (safe, non-ISR printing)
 // Add -DTRIAC_DEBUG_SERIAL to build_flags to enable
@@ -181,19 +172,5 @@ void resetPressurePid();
  * @return Pointer to PidController structure
  */
 PidController* getPressurePid();
-
-/**
- * @brief Enable or disable PID self-learning (legacy - does nothing)
- * 
- * @param enable True to enable learning, false to disable
- */
-void setPidLearning(bool enable);
-
-/**
- * @brief Check if PID learning is enabled (legacy - always returns false)
- * 
- * @return True if learning is enabled
- */
-bool isPidLearningEnabled();
 
 #endif // MOTOR_CONTROL_H

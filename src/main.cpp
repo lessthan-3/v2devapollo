@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include <ESP32Encoder.h>
 #include <Preferences.h>
+#include "config.h"
 #include "pressure_sensor.h"
 #include "motor_control.h"
 #include "dual_core_motor.h"
@@ -18,69 +19,6 @@ ESP32Encoder encoder;
 
 // Preferences for storing hour meter
 Preferences preferences;
-
-// Encoder pins
-#define ENCODER_CLK 41  // A (Right)
-#define ENCODER_DT  42  // B (Left)
-#define ENCODER_BTN 5   // Button
-
-// Button detection workaround - use ADC instead of digital read
-// TODO: Remove this workaround once board is fixed
-#define USE_ADC_FOR_BUTTON 0  // Set to 0 to use digitalRead instead
-#define BUTTON_ADC_THRESHOLD 2.5f  // Voltage threshold for button press
-#define BUTTON_ADC_THRESHOLD_RAW ((uint16_t)((BUTTON_ADC_THRESHOLD / 3.3f) * 4095))  // ~3103 for 2.5V
-
-// Backlight pin
-#define TFT_BL 21
-
-// Pressure reading interval
-#define PRESSURE_READ_INTERVAL_MS 5  // Set to 0 for continuous reading (as fast as possible)
-
-// Display update intervals (separate from data polling for performance)
-#define DISPLAY_PRESSURE_INTERVAL_MS  100   // Update pressure display at 10Hz
-#define DISPLAY_DEBUG_INTERVAL_MS     500   // Update debug info at 2Hz
-#define SERIAL_DEBUG_INTERVAL_MS      1000  // Serial output at 1Hz
-
-// Temperature sensor polling and limits
-#define TEMP_READ_INTERVAL_MS  1000   // Temperature update interval
-#define TEMP_OVERHEAT_SETPOINT 115.0f // Overtemperature shutdown setpoint
-#define TEMP_OVERHEAT_CLEAR    100.0f // Clear overtemperature below this
-
-// Target pressure settings
-#define TARGET_PSI_MIN      3.0f    // Minimum target PSI
-#define TARGET_PSI_MAX      9.0f    // Maximum target PSI
-#define TARGET_PSI_DEFAULT  6.0f    // Default target PSI
-#define TARGET_PSI_STEP     0.1f    // Encoder step size
-
-// Runtime auto-pause (seconds). Set to 0 to disable auto-pause.
-#define RUNTIME_AUTO_PAUSE_SEC  0
-
-// Firmware version
-#define FIRMWARE_VERSION    "2.0.0"
-
-// PID gain adjustment step sizes
-#define KP_STEP             0.05f
-#define KI_STEP             0.05f
-#define KD_STEP             0.05f
-#define KP_MIN              0.25f
-#define KP_MAX              100.0f
-#define KI_MIN              0.0f
-#define KI_MAX              100.0f
-#define KD_MIN              0.0f
-#define KD_MAX              100.0f
-
-// Idle entry deviation tuning
-#define IDLE_DEV_STEP       0.05f
-#define IDLE_DEV_MIN        0.05f
-#define IDLE_DEV_MAX        2.0f
-
-// Power pause settings
-#define POWER_PAUSE_SEC_MIN 0
-#define POWER_PAUSE_SEC_MAX 600
-#define POWER_PAUSE_SEC_STEP 1
-#define POWER_PAUSE_WARN_SEC_MIN 0
-#define POWER_PAUSE_WARN_SEC_MAX 600
-#define POWER_PAUSE_WARN_SEC_STEP 1
 
 // Screen state enumeration
 typedef enum {
@@ -113,9 +51,6 @@ uint32_t runtimePauseDeadlineSec = 0;
 // Settings screen state
 uint8_t settingsIndex = 0;
 bool settingsEditing = false;
-float settingsKp = PID_KP_DEFAULT;
-float settingsKi = PID_KI_DEFAULT;
-float settingsKd = PID_KD_DEFAULT;
 float settingsIdleDev = IDLE_ENTRY_DEVIATION_PSI;
 float settingsStartPsi = TARGET_PSI_DEFAULT;
 bool settingsDirty = false;
@@ -127,9 +62,6 @@ uint16_t powerPauseSeconds = IDLE_ENTRY_SECONDS;
 bool powerPauseBeeperEnabled = true;
 uint16_t powerPauseWarnSeconds = 5;
 bool powerPauseDirty = false;
-
-// Encoder mode state
-EncoderMode currentEncoderMode = MODE_TARGET_PRESSURE;
 
 // Debug display variables
 unsigned long lastPidCalcTime = 0;     // Timestamp of last PID calculation
@@ -144,7 +76,6 @@ void enterMenuScreen();
 void enterRuntimeScreen();
 void enterSettingsScreen();
 void enterPowerPauseSettingsScreen();
-void syncPidGainsFromSettings(bool saveToNvs);
 void loadSettings();
 void saveSettings();
 void syncPowerPauseSettings(bool saveToNvs);
@@ -158,8 +89,8 @@ void setup() {
   beeperInit();
 
   // Initialize backlight pin
-  pinMode(TFT_BL, OUTPUT);
-  digitalWrite(TFT_BL, HIGH);  // Turn on backlight
+  pinMode(PIN_TFT_BL, OUTPUT);
+  digitalWrite(PIN_TFT_BL, HIGH);  // Turn on backlight
 
   // Initialize the display
   tft.init();
@@ -172,7 +103,7 @@ void setup() {
   
   // Initialize rotary encoder
   ESP32Encoder::useInternalWeakPullResistors = puType::up;
-  encoder.attachHalfQuad(ENCODER_DT, ENCODER_CLK);
+  encoder.attachHalfQuad(PIN_ENCODER_DT, PIN_ENCODER_CLK);
   encoder.setCount((int64_t)(TARGET_PSI_DEFAULT / TARGET_PSI_STEP));  // Start at default
   lastEncoderCount = encoder.getCount();
 
@@ -181,27 +112,14 @@ void setup() {
   analogReadResolution(12);
   analogSetPinAttenuation(TEMP_SENSOR_PIN, ADC_11db);
   tempSensorInit();
-  
-  // Initialize encoder button
-  pinMode(ENCODER_BTN, INPUT_PULLUP);
 
-  
+  // Initialize encoder button
+  pinMode(PIN_ENCODER_BTN, INPUT_PULLUP);
+
   Serial.println("Encoder initialized");
-  // tft.setCursor(180, 240);
-  // tft.setTextColor(TFT_GREEN, COLOR_BG);
-  // tft.println("Encoder: OK");
-  
-  // Note: Pressure sensor will be initialized on Core 0 in motorControlTask
-  // This is required because Wire/I2C must be used from the same core it was initialized on
-  // tft.setCursor(180, 250);
-  // tft.setTextColor(TFT_YELLOW, COLOR_BG);
-  // tft.println("Pressure: Core0");
-  
+
   // Load hour meter from flash
   loadHourMeter();
-  // tft.setCursor(180, 260);
-  // tft.setTextColor(TFT_GREEN, COLOR_BG);
-  // tft.printf("Hours: %lu.%lu", totalRuntimeTenths / 10, totalRuntimeTenths % 10);
 
   // Load settings from flash
   loadSettings();
@@ -210,21 +128,15 @@ void setup() {
   setTargetPressureSafe(targetPsi);
   encoder.setCount((int64_t)lroundf(targetPsi / TARGET_PSI_STEP));
   lastEncoderCount = encoder.getCount();
-  
+
   // Initialize motor control (zero crossing interrupt)
   delay(100);
   if (motorControlInit()) {
-    //tft.setCursor(180, 270);
-    //tft.setTextColor(TFT_GREEN, COLOR_BG);
-    //tft.println("Motor: OK");
     Serial.println("Motor control initialized");
-    
+
     // Initialize the pressure PID controller (loads saved gains from NVS)
     pressurePidInit();
-    //tft.setCursor(180, 275);
-    //tft.setTextColor(TFT_GREEN, COLOR_BG);
-    //tft.println("PID: OK");
-    
+
     // Sync initial PID gains to the shared data for dual-core motor task
     {
       PidController* pid = getPressurePid();
@@ -233,47 +145,28 @@ void setup() {
       setPidGainsSafe(kp, ki, kd);
       Serial.printf("Synced initial PID gains: Kp=%.1f Ki=%.1f Kd=%.1f\n", kp, ki, kd);
     }
-    
+
     // Detect AC frequency
     AcFrequency acFreq = detectAcFrequency();
-    tft.setCursor(180, 280);
-    if (acFreq != AC_FREQ_UNKNOWN) {
-      //tft.setTextColor(TFT_GREEN, COLOR_BG);
-      //tft.printf("AC: %dHz", acFreq);
-    } else {
-      //tft.setTextColor(TFT_ORANGE, COLOR_BG);
-      //tft.println("AC: Unknown");
+    if (acFreq == AC_FREQ_UNKNOWN) {
+      Serial.println("AC frequency: Unknown");
     }
-    
+
     // Initialize dual-core motor control (runs PID on Core 0)
     if (dualCoreMotorInit()) {
-      //tft.setCursor(180, 290);
-      //tft.setTextColor(TFT_GREEN, COLOR_BG);
-      //tft.println("Dual-Core: OK");
       Serial.println("Dual-core motor control initialized");
-      
-      // Set initial target pressure
       setTargetPressureSafe(TARGET_PSI_DEFAULT);
     } else {
-      //tft.setCursor(180, 290);
-      //tft.setTextColor(TFT_RED, COLOR_BG);
-      //tft.println("Dual-Core: FAIL");
       Serial.println("Dual-core motor control FAILED");
     }
   } else {
-    //tft.setCursor(180, 270);
-    tft.setTextColor(TFT_RED, COLOR_BG);
-    //tft.println("Motor: FAIL");
     Serial.println("Motor control FAILED");
   }
-  
+
   // Record session start time
   sessionStartMillis = millis();
-  
-  delay(2000);
-  
-  // Startup screen before menu
-  delay(1500);
+
+  delay(3500);
   enterMenuScreen();
   Serial.println("Entered menu screen; motor disabled");
 }
@@ -404,14 +297,12 @@ void enterSettingsScreen() {
   settingsIndex = 0;
   settingsScrollAccumulator = 0;
 
-  PidController* pid = getPressurePid();
-  pidGetGains(pid, &settingsKp, &settingsKi, &settingsKd);
   settingsIdleDev = getIdleEntryDeviationSafe();
 
   encoder.setCount(settingsIndex);
   lastEncoderCount = encoder.getCount();
 
-  drawSettingsScreen(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, settingsEditing, true);
+  drawSettingsScreen(settingsIndex, settingsIdleDev, settingsStartPsi, settingsEditing, true);
 }
 
 void enterPowerPauseSettingsScreen() {
@@ -432,21 +323,6 @@ void enterPowerPauseSettingsScreen() {
   lastEncoderCount = encoder.getCount();
 
   drawPowerPauseSettingsScreen(powerPauseIndex, powerPauseSeconds, powerPauseBeeperEnabled, powerPauseWarnSeconds, powerPauseEditing, true);
-}
-
-void syncPidGainsFromSettings(bool saveToNvs) {
-  PidController* pid = getPressurePid();
-  pidSetGains(pid, settingsKp, settingsKi, settingsKd);
-  setPidGainsSafe(settingsKp, settingsKi, settingsKd);
-  requestPidReset();
-
-  setIdleEntryDeviationSafe(settingsIdleDev);
-
-  if (saveToNvs) {
-    pidSaveGains(pid);
-    saveSettings();
-    settingsDirty = false;
-  }
 }
 
 void syncPowerPauseSettings(bool saveToNvs) {
@@ -539,31 +415,21 @@ void loop() {
       drawRuntimeTarget(targetPsi, smoothedPressure, displayValid);
     } else if (currentScreen == SCREEN_SETTINGS) {
       if (settingsEditing) {
+        // Index 0 = Idle dev, Index 1 = Start psi
         float step = 0.0f;
-        if (settingsIndex == 0) step = KP_STEP;
-        if (settingsIndex == 1) step = KI_STEP;
-        if (settingsIndex == 2) step = KD_STEP;
-        if (settingsIndex == 3) step = IDLE_DEV_STEP;
-        if (settingsIndex == 4) step = TARGET_PSI_STEP;
+        if (settingsIndex == 0) step = IDLE_DEV_STEP;
+        if (settingsIndex == 1) step = TARGET_PSI_STEP;
 
         if (step > 0.0f) {
           float change = (float)delta * step;
           if (settingsIndex == 0) {
-            settingsKp = constrain(settingsKp + change, KP_MIN, KP_MAX);
-          } else if (settingsIndex == 1) {
-            settingsKi = constrain(settingsKi + change, KI_MIN, KI_MAX);
-          } else if (settingsIndex == 2) {
-            settingsKd = constrain(settingsKd + change, KD_MIN, KD_MAX);
-          } else if (settingsIndex == 3) {
             settingsIdleDev = constrain(settingsIdleDev + change, IDLE_DEV_MIN, IDLE_DEV_MAX);
-          } else if (settingsIndex == 4) {
+            setIdleEntryDeviationSafe(settingsIdleDev);
+          } else if (settingsIndex == 1) {
             settingsStartPsi = constrain(settingsStartPsi + change, TARGET_PSI_MIN, TARGET_PSI_MAX);
           }
           settingsDirty = true;
-          if (settingsIndex <= 3) {
-            syncPidGainsFromSettings(false);
-          }
-          drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, true);
+          drawSettingsRow(settingsIndex, settingsIdleDev, settingsStartPsi, true, true);
         }
       } else {
         settingsScrollAccumulator += (int32_t)delta;
@@ -586,8 +452,8 @@ void loop() {
           encoder.setCount(settingsIndex);
           lastEncoderCount = encoder.getCount();
           if (previousIndex != settingsIndex) {
-            drawSettingsRow(previousIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, false, false);
-            drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, false);
+            drawSettingsRow(previousIndex, settingsIdleDev, settingsStartPsi, false, false);
+            drawSettingsRow(settingsIndex, settingsIdleDev, settingsStartPsi, true, false);
           }
         }
       }
@@ -651,8 +517,8 @@ void loop() {
   // Button handling (simple debounce)
   static bool lastButtonState = false;
   static unsigned long lastButtonChange = 0;
-  bool buttonPressed = (digitalRead(ENCODER_BTN) == LOW);
-  if (buttonPressed != lastButtonState && (millis() - lastButtonChange) > 30) {
+  bool buttonPressed = (digitalRead(PIN_ENCODER_BTN) == LOW);
+  if (buttonPressed != lastButtonState && (millis() - lastButtonChange) > BUTTON_DEBOUNCE_MS) {
     lastButtonChange = millis();
     lastButtonState = buttonPressed;
     if (!buttonPressed) {
@@ -671,25 +537,29 @@ void loop() {
       } else if (currentScreen == SCREEN_SETTINGS) {
         if (settingsEditing) {
           settingsEditing = false;
-          drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, false);
+          drawSettingsRow(settingsIndex, settingsIdleDev, settingsStartPsi, true, false);
           drawSettingsFooter("Press to edit / select", TFT_GREEN);
         } else {
-          if (settingsIndex <= 4) {
+          if (settingsIndex <= 1) {
+            // Index 0 = Idle dev, Index 1 = Start psi — both editable
             settingsEditing = true;
-            drawSettingsRow(settingsIndex, settingsKp, settingsKi, settingsKd, settingsIdleDev, settingsStartPsi, true, true);
+            drawSettingsRow(settingsIndex, settingsIdleDev, settingsStartPsi, true, true);
             drawSettingsFooter("Rotate to adjust, press to exit", TFT_YELLOW);
-          } else if (settingsIndex == 5) {
+          } else if (settingsIndex == 2) {
+            // Save
             if (settingsDirty) {
-              syncPidGainsFromSettings(true);
+              saveSettings();
               targetPsi = settingsStartPsi;
               setTargetPressureSafe(targetPsi);
               encoder.setCount((int64_t)lroundf(targetPsi / TARGET_PSI_STEP));
               lastEncoderCount = encoder.getCount();
-              drawSettingsFooter("PID saved", TFT_GREEN);
+              settingsDirty = false;
+              drawSettingsFooter("Settings saved", TFT_GREEN);
             } else {
               drawSettingsFooter("No changes to save", TFT_ORANGE);
             }
-          } else if (settingsIndex == 6) {
+          } else if (settingsIndex == 3) {
+            // Back
             enterMenuScreen();
           }
         }
@@ -823,7 +693,7 @@ void loop() {
 #endif
 
   // Update hour meter every 6 minutes (0.1 hours)
-  if (millis() - lastHourMeterUpdate >= 360000) {
+  if (millis() - lastHourMeterUpdate >= HOUR_METER_UPDATE_INTERVAL_MS) {
     lastHourMeterUpdate = millis();
     totalRuntimeTenths++;
     saveHourMeter();

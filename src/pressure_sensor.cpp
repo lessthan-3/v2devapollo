@@ -69,25 +69,13 @@ bool PressureSensor::begin() {
                       scl == HIGH ? "HIGH" : "LOW");
     }
 
-    // CSB pin: HIGH or floating = I2C mode, LOW = SPI mode
-    // Try pulling HIGH first since floating may not be reliable on all boards
-    // pinMode(PRESSURE_CSB_PIN, OUTPUT);
-    // digitalWrite(PRESSURE_CSB_PIN, HIGH);  // Explicitly set HIGH for I2C mode
-    
-    // Serial.printf("Pressure sensor: CSB pin %d configured as floating input for I2C mode\n", 
-    //               PRESSURE_CSB_PIN);
 
-    //csb physically disonnected on PCB, no longer need to pull high
-    
-    // Allow sensor time to recognize I2C mode and stabilize
     delay(100);
     
-    // End any existing Wire instance before reinitializing
+
     Wire.end();
     delay(10);
     
-    // Initialize I2C with custom pins
-    // ESP32-S3 requires explicit pin configuration
     if (!Wire.begin(PRESSURE_SDA_PIN, PRESSURE_SCL_PIN)) {
         lastError = PRESSURE_ERR_I2C_BEGIN;
         Serial.println("Pressure sensor: Wire.begin() failed");
@@ -287,26 +275,11 @@ PressureReading PressureSensor::readPressureData() {
         return reading;
     }
     
-    // Convert raw bytes to signed 24-bit value
+
     reading.rawValue = convertRawToSigned(buffer[0], buffer[1], buffer[2]);
 
-    // Serial.printf("Pressure sensor: Raw value = %ld (0x%06lX), Zero point = %ld\n", 
-    //               (long)reading.rawValue, (unsigned long)(reading.rawValue & 0xFFFFFF),
-    //               (long)PRESSURE_24BIT_MAX);
-    
-    // Calculate normalized value
-    // Based on datasheet:
-    // - Zero condition = 8388608 (2^23)
-    // - Values below 8388608 are below zero pressure
-    // - Values above 8388608 are above zero pressure
-    // 
-    // normalized = (rawValue - ZERO_POINT) / FULL_SCALE
     int32_t fullScale = pressure24bitMax > 0 ? pressure24bitMax : PRESSURE_24BIT_MAX;
-    // if (reading.rawValue < PRESSURE_24BIT_MAX/2) {
-    //     reading.normalizedValue = (float)(reading.rawValue - zeroPointRaw) / (fullScale) * 1.26f;
-    // } else {
-    //     reading.normalizedValue = (float)-(zeroPointRaw - reading.rawValue) / (fullScale) * 1.26f;
-    // }
+
 
     //from zero point to rollover point 
     if (reading.rawValue >= zeroPointRaw-PRESSURE_23BIT_MAX) {

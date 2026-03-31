@@ -8,7 +8,6 @@ extern float targetPsi;
 extern unsigned long minMaxFlashStart;
 extern bool showingMinMax;
 extern bool isMinNotMax;
-extern EncoderMode currentEncoderMode;
 extern uint32_t sessionStartMillis;
 extern uint32_t totalRuntimeTenths;
 extern unsigned long pidLoopIntervalMs;
@@ -216,67 +215,6 @@ void drawDebugInfo() {
   }
 }
 
-const char* getModeName(EncoderMode mode) {
-  switch (mode) {
-    case MODE_TARGET_PRESSURE: return "TARGET";
-    case MODE_KP: return "Kp";
-    case MODE_KI: return "Ki";
-    case MODE_KD: return "Kd";
-    default: return "???";
-  }
-}
-
-void drawModeIndicator() {
-  static EncoderMode lastMode = MODE_COUNT;
-
-  if (lastMode == currentEncoderMode) {
-    unsigned long sessionMs = millis() - sessionStartMillis;
-    unsigned long sessionMin = sessionMs / 60000;
-    unsigned long sessionHr = sessionMin / 60;
-    sessionMin %= 60;
-
-    tft.fillRect(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 55, 100, 30, COLOR_BG);
-    tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
-    tft.setTextSize(1);
-    tft.setCursor(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 55);
-    tft.printf("Sess: %lu:%02lu", sessionHr, sessionMin);
-    tft.setCursor(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 68);
-    tft.printf("Total: %lu.%lu hr", totalRuntimeTenths / 10, totalRuntimeTenths % 10);
-    return;
-  }
-  lastMode = currentEncoderMode;
-
-  tft.fillRect(0, STATUS_ZONE_Y + 50, SCREEN_WIDTH, 30, COLOR_BG);
-
-  tft.setTextSize(2);
-  tft.setCursor(LEFT_COLUMN_X, STATUS_ZONE_Y + 55);
-
-  tft.setTextColor(TFT_BLACK, TFT_YELLOW);
-  tft.printf(" MODE: %s ", getModeName(currentEncoderMode));
-
-  tft.setCursor(LEFT_COLUMN_X + 150, STATUS_ZONE_Y + 55);
-  for (int i = 0; i < MODE_COUNT; i++) {
-    if (i == currentEncoderMode) {
-      tft.setTextColor(TFT_BLACK, TFT_GREEN);
-    } else {
-      tft.setTextColor(TFT_DARKGREY, COLOR_BG);
-    }
-    tft.printf("[%d]", i);
-  }
-
-  unsigned long sessionMs = millis() - sessionStartMillis;
-  unsigned long sessionMin = sessionMs / 60000;
-  unsigned long sessionHr = sessionMin / 60;
-  sessionMin %= 60;
-
-  tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
-  tft.setTextSize(1);
-  tft.setCursor(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 55);
-  tft.printf("Sess: %lu:%02lu", sessionHr, sessionMin);
-  tft.setCursor(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 68);
-  tft.printf("Total: %lu.%lu hr", totalRuntimeTenths / 10, totalRuntimeTenths % 10);
-}
-
 void flashMinMax(bool isMin) {
   showingMinMax = true;
   isMinNotMax = isMin;
@@ -360,26 +298,19 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   drawMenuFooter("Press to select", TFT_GREEN);
 }
 
-void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool editing, bool forceRedraw) {
+void drawSettingsScreen(uint8_t settingsIndex, float idleDev, float startPsi, bool editing, bool forceRedraw) {
   static uint8_t lastIndex = 255;
-  static float lastKp = -1.0f;
-  static float lastKi = -1.0f;
-  static float lastKd = -1.0f;
   static float lastIdleDev = -1.0f;
   static float lastStartPsi = -1.0f;
   static bool lastEditing = false;
 
   if (!forceRedraw && lastIndex == settingsIndex && lastEditing == editing &&
-      fabsf(kp - lastKp) < 0.01f && fabsf(ki - lastKi) < 0.01f && fabsf(kd - lastKd) < 0.01f &&
       fabsf(idleDev - lastIdleDev) < 0.01f && fabsf(startPsi - lastStartPsi) < 0.01f) {
     return;
   }
 
   lastIndex = settingsIndex;
   lastEditing = editing;
-  lastKp = kp;
-  lastKi = ki;
-  lastKd = kd;
   lastIdleDev = idleDev;
   lastStartPsi = startPsi;
 
@@ -391,7 +322,7 @@ void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, flo
 
   for (uint8_t i = 0; i < SETTINGS_OPTION_COUNT; i++) {
     bool selected = (i == settingsIndex);
-    drawSettingsRow(i, kp, ki, kd, idleDev, startPsi, selected, editing);
+    drawSettingsRow(i, idleDev, startPsi, selected, editing);
   }
 
   if (editing) {
@@ -475,8 +406,8 @@ void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, boo
   }
 }
 
-void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool selected, bool editing) {
-  const char* options[SETTINGS_OPTION_COUNT] = {"Kp", "Ki", "Kd", "Idle dev", "Start psi", "Save", "Back"};
+void drawSettingsRow(uint8_t settingsIndex, float idleDev, float startPsi, bool selected, bool editing) {
+  const char* options[SETTINGS_OPTION_COUNT] = {"Idle dev", "Start psi", "Save", "Back"};
   int y = SETTINGS_TOP_Y + (settingsIndex * SETTINGS_OPTION_HEIGHT);
   uint16_t bg = COLOR_BG;
   uint16_t fg = TFT_WHITE;
@@ -491,15 +422,12 @@ void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float 
   tft.setCursor(60, y);
   tft.print(options[settingsIndex]);
 
-  if (settingsIndex <= 4) {
-    float value = 0.0f;
-    if (settingsIndex == 0) value = kp;
-    if (settingsIndex == 1) value = ki;
-    if (settingsIndex == 2) value = kd;
-    if (settingsIndex == 3) value = idleDev;
-    if (settingsIndex == 4) value = startPsi;
+  if (settingsIndex == 0) {
     tft.setCursor(SCREEN_WIDTH - 140, y);
-    tft.printf("%5.2f", value);
+    tft.printf("%5.2f", idleDev);
+  } else if (settingsIndex == 1) {
+    tft.setCursor(SCREEN_WIDTH - 140, y);
+    tft.printf("%5.2f", startPsi);
   }
 }
 

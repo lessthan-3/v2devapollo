@@ -107,7 +107,8 @@ void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw = 
 void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, bool forceRedraw = false);
 void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining, bool forceRedraw = false);
 void drawRuntimeOverTempOverlay(float tempC, bool forceRedraw = false);
+void drawRuntimeFilterWarningOverlay();
 void drawSupportScreen();
-void drawAboutScreen(uint32_t totalRuntimeTenths, const char* firmwareVersion);
+void drawAboutScreen(uint32_t totalRuntimeTenths, const char* firmwareVersion, uint8_t selectedOption = 0);
 
 #endif

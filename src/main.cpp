@@ -138,6 +138,10 @@ const uint16_t powerPauseWarnSeconds = POWER_PAUSE_WARN_SEC;  // Fixed at 10 sec
 DisplayUnits displayUnits = UNITS_IMPERIAL;
 bool powerPauseDirty = false;
 
+// About screen state
+uint8_t aboutIndex = 0;  // 0 = Reset Filter Timer, 1 = Exit
+int32_t aboutScrollAccumulator = 0;
+
 // Encoder mode state
 EncoderMode currentEncoderMode = MODE_TARGET_PRESSURE;
 
@@ -300,6 +304,8 @@ void loadHourMeter() {
     totalRuntimeTenths = preferences.getULong("hourTenths", 0);
     preferences.end();
     Serial.printf("Hour meter loaded: %lu.%lu hours\n", totalRuntimeTenths / 10, totalRuntimeTenths % 10);
+    
+
   } else {
     // NVS namespace doesn't exist yet, create it
     Serial.println("Hour meter: No saved data, initializing...");
@@ -415,6 +421,21 @@ void enterRuntimeScreen() {
   getRawPressureSafe(&rawPsi, &rawValue, &rawValid);
   drawRuntimeSensorPressureDebug(rawPsi, rawValue, rawValid, true);
 #endif
+
+  // Show filter maintenance warning if over 10 hours (100 tenths)
+  if (totalRuntimeTenths >= 100) {
+    drawRuntimeFilterWarningOverlay();
+    delay(5000);  // Show warning for 5 seconds
+    
+    // Redraw runtime screen after warning
+    drawRuntimeStatic(displayUnits);
+    drawRuntimeTarget(targetPsi, currentPsi, displayUnits, pressureValid, true);
+    drawRuntimeJobTime(0, true);
+    drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
+#if DEBUG_DISPLAY_SENSOR_PRESSURE
+    drawRuntimeSensorPressureDebug(rawPsi, rawValue, rawValid, true);
+#endif
+  }
 }
 
 void enterSettingsScreen() {
@@ -443,9 +464,11 @@ void enterSupportScreen() {
 
 void enterAboutScreen() {
   currentScreen = SCREEN_ABOUT;
+  aboutIndex = 0;  // Start with "Reset Filter Timer" selected
+  aboutScrollAccumulator = 0;
   encoder.setCount(0);
   lastEncoderCount = encoder.getCount();
-  drawAboutScreen(totalRuntimeTenths, FIRMWARE_VERSION);
+  drawAboutScreen(totalRuntimeTenths, FIRMWARE_VERSION, aboutIndex);
 }
 
 // Job timer functions
@@ -697,6 +720,28 @@ void loop() {
           }
         }
       }
+    } else if (currentScreen == SCREEN_ABOUT) {
+      // About screen - navigate between Reset Timer and Exit
+      aboutScrollAccumulator += (int32_t)delta;
+      int32_t aboutSteps = 0;
+      while (aboutScrollAccumulator >= 2) {
+        aboutSteps++;
+        aboutScrollAccumulator -= 2;
+      }
+      while (aboutScrollAccumulator <= -2) {
+        aboutSteps--;
+        aboutScrollAccumulator += 2;
+      }
+
+      if (aboutSteps != 0) {
+        int32_t newIndex = (int32_t)aboutIndex + aboutSteps;
+        if (newIndex < 0) newIndex = 0;
+        if (newIndex > 1) newIndex = 1;  // 0 = Reset Timer, 1 = Exit
+        aboutIndex = (uint8_t)newIndex;
+        encoder.setCount(aboutIndex);
+        lastEncoderCount = encoder.getCount();
+        drawAboutScreen(totalRuntimeTenths, FIRMWARE_VERSION, aboutIndex);
+      }
     }
   }
 
@@ -741,8 +786,21 @@ void loop() {
             enterMenuScreen();
           }
         }
-      } else if (currentScreen == SCREEN_SUPPORT || currentScreen == SCREEN_ABOUT) {
+      } else if (currentScreen == SCREEN_SUPPORT) {
         enterMenuScreen();
+      } else if (currentScreen == SCREEN_ABOUT) {
+        // Handle About screen options
+        if (aboutIndex == 0) {
+          // Reset Filter Timer option selected
+          totalRuntimeTenths = 0;
+          saveHourMeter();
+          // Redraw screen to show updated time (0.0 hrs in green)
+          drawAboutScreen(totalRuntimeTenths, FIRMWARE_VERSION, aboutIndex);
+          delay(1000);  // Brief pause to show the reset
+        } else if (aboutIndex == 1) {
+          // Exit option selected
+          enterMenuScreen();
+        }
       } else if (currentScreen == SCREEN_POWERPAUSE_SETTINGS) {
         if (powerPauseEditing) {
           powerPauseEditing = false;
@@ -947,9 +1005,15 @@ void loop() {
 #endif
 
   // Update hour meter every 6 minutes (0.1 hours)
+  // Only increment when motor is running (power > 0) and in runtime screen
   if (millis() - lastHourMeterUpdate >= 360000) {
     lastHourMeterUpdate = millis();
-    totalRuntimeTenths++;
-    saveHourMeter();
+    
+    // Check if motor is actually running
+    uint16_t motorSpeed = getMotorSpeedSafe();
+    if (currentScreen == SCREEN_RUNTIME && motorSpeed > 0) {
+      totalRuntimeTenths++;
+      saveHourMeter();
+    }
   }
 }

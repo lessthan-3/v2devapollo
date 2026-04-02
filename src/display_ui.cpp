@@ -724,6 +724,39 @@ void drawRuntimeOverTempOverlay(float tempC, bool forceRedraw) {
   }
 }
 
+void drawRuntimeFilterWarningOverlay() {
+  const int overlayX = 20;
+  const int overlayY = 50;
+  const int overlayW = SCREEN_WIDTH - (overlayX * 2);
+  const int overlayH = 220;
+
+  // Draw overlay with border
+  tft.fillRect(overlayX, overlayY, overlayW, overlayH, COLOR_OVERLAY_BG);
+  tft.drawRect(overlayX, overlayY, overlayW, overlayH, COLOR_WARNING);
+  tft.drawRect(overlayX + 1, overlayY + 1, overlayW - 2, overlayH - 2, COLOR_WARNING);
+  
+  // Title
+  tft.setTextColor(COLOR_WARNING, COLOR_OVERLAY_BG);
+  tft.setTextSize(3);
+  tft.setCursor(overlayX + 30, overlayY + 20);
+  tft.print("Filter Maintenance");
+  tft.setCursor(overlayX + 100, overlayY + 55);
+  tft.print("Required");
+
+  // Message
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_OVERLAY_BG);
+  tft.setTextSize(2);
+  tft.setCursor(overlayX + 30, overlayY + 100);
+  tft.print("Clean filters to protect");
+  tft.setCursor(overlayX + 30, overlayY + 125);
+  tft.print("motor.");
+
+  tft.setCursor(overlayX + 30, overlayY + 160);
+  tft.print("Reset Filter Timer in");
+  tft.setCursor(overlayX + 30, overlayY + 185);
+  tft.print("About Settings to clear.");
+}
+
 void drawSupportScreen() {
   tft.fillScreen(COLOR_BG);
   
@@ -762,7 +795,7 @@ void drawSupportScreen() {
   tft.print("Press to return to menu");
 }
 
-void drawAboutScreen(uint32_t totalRuntimeTenths, const char* firmwareVersion) {
+void drawAboutScreen(uint32_t totalRuntimeTenths, const char* firmwareVersion, uint8_t selectedOption) {
   tft.fillScreen(COLOR_BG);
   
   // Title
@@ -784,24 +817,48 @@ void drawAboutScreen(uint32_t totalRuntimeTenths, const char* firmwareVersion) {
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
   tft.print(firmwareVersion);
   
-  // Total motor runtime
+  // Filter timer (formerly Total motor runtime)
   uint32_t totalHours = totalRuntimeTenths / 10;
   uint8_t tenths = totalRuntimeTenths % 10;
   
   tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
-  tft.setCursor(80, 170);
-  tft.print("Total Motor Hours:");
+  tft.setTextSize(2);
+  tft.setCursor(50, 170);
+  tft.print("Time since last filter clean:");
   
-  tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
+  // Color code: green if < 10 hours, red if >= 10 hours
+  uint16_t timeColor = (totalRuntimeTenths < 100) ? COLOR_SUCCESS : COLOR_ERROR;
+  tft.setTextColor(timeColor, COLOR_BG);
   tft.setTextSize(3);
   tft.setCursor(140, 200);
   char hoursStr[16];
   snprintf(hoursStr, sizeof(hoursStr), "%lu.%u hrs", (unsigned long)totalHours, tenths);
   tft.print(hoursStr);
   
-  // Footer
-  tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+  // Footer with two options
+  const int optionY = SCREEN_HEIGHT - 50;
+  const int option1X = 40;
+  const int option2X = 280;
+  
+  // Option 1: Reset Filter Timer
+  if (selectedOption == 0) {
+    tft.fillRect(option1X - 5, optionY - 5, 200, 35, COLOR_MENU_SELECT);
+    tft.setTextColor(TFT_BLACK, COLOR_MENU_SELECT);
+  } else {
+    tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  }
   tft.setTextSize(2);
-  tft.setCursor(100, SCREEN_HEIGHT - 40);
-  tft.print("Press to return to menu");
+  tft.setCursor(option1X, optionY);
+  tft.print("Reset Timer");
+  
+  // Option 2: Exit
+  if (selectedOption == 1) {
+    tft.fillRect(option2X - 5, optionY - 5, 100, 35, COLOR_MENU_SELECT);
+    tft.setTextColor(TFT_BLACK, COLOR_MENU_SELECT);
+  } else {
+    tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  }
+  tft.setTextSize(2);
+  tft.setCursor(option2X, optionY);
+  tft.print("Exit");
 }

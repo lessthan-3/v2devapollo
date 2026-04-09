@@ -2,8 +2,7 @@
 #define BEEPER_H
 
 #include <Arduino.h>
-
-#define BEEPER_PIN 4
+#include "config.h"
 
 void beeperInit();
 void setBeeper(bool enabled);

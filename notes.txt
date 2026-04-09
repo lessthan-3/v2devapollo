@@ -66,3 +66,7 @@ Make modular UI elements
 Follow senior engineer practices
 
 
+
+
+I want to make an adjustment to the way power pause is done, instead of looking for deviation in the pressure we should look for when the motor power has reached a stable point and then look for spikes in the motor power to reset the count.
+

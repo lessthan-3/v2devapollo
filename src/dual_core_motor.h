@@ -1,34 +1,16 @@
 /**
  * @file dual_core_motor.h
  * @brief Dual-core architecture for separating motor control from display
- * 
- * Motor control (time-critical) runs on Core 0
- * Display/UI runs on Core 1 (Arduino default)
+ *
+ * Motor control (time-critical) runs on Core 0.
+ * Display / UI runs on Core 1 (Arduino default).
  */
 
 #ifndef DUAL_CORE_MOTOR_H
 #define DUAL_CORE_MOTOR_H
 
 #include <Arduino.h>
-
-// Core assignments
-#define MOTOR_CONTROL_CORE  0   // Core 0 for time-critical motor control
-#define DISPLAY_CORE        1   // Core 1 for display (Arduino default)
-
-// Motor control task parameters
-#define MOTOR_TASK_STACK_SIZE   4096    // Stack size in bytes
-#define MOTOR_TASK_PRIORITY     2       // Higher priority than display
-#define MOTOR_LOOP_INTERVAL_US  5000    // 5ms loop interval (200Hz)
-
-// Idle / power pause behavior
-#define IDLE_ENTRY_SECONDS          20    // Default seconds of stable pressure before idle
-#define IDLE_ENTRY_DEVIATION_PSI    0.20f  // Allowed deviation from target to count as stable
-#define IDLE_ENTRY_DECREASE         500     // Counter decrease rate when outside band
-#define IDLE_TARGET_PSI             2.5f  // Idle pressure target
-#define IDLE_STABLE_SECONDS         2     // Seconds at idle target before holding speed
-#define IDLE_STABLE_BAND_PSI        0.15f // Allowed deviation at idle target for stability
-#define IDLE_EXIT_DROP_PSI          0.2f  // Pressure drop below idle target to exit
-#define IDLE_MIN_HOLD_SPEED         50     // Minimum motor speed to hold in idle (0-1000 scale)
+#include "config.h"
 
 typedef enum {
     IDLE_STATE_OFF = 0,
@@ -36,125 +18,90 @@ typedef enum {
     IDLE_STATE_HOLD
 } IdleState;
 
-// Shared data structure (thread-safe access)
+typedef enum {
+    UNITS_IMPERIAL = 0,
+    UNITS_METRIC   = 1
+} DisplayUnits;
+
+// Shared data between Core 0 (motor task) and Core 1 (display task)
 typedef struct {
-    // Inputs (written by display task, read by motor task)
-    volatile float targetPsi;           // Target pressure setpoint
-    volatile bool motorEnabled;         // Enable/disable motor
-    volatile bool pidResetRequest;      // Request PID reset
-    volatile bool pidGainsChanged;      // Flag to indicate gains changed
-    volatile float pidKp;               // PID proportional gain
-    volatile float pidKi;               // PID integral gain
-    volatile float pidKd;               // PID derivative gain
-    volatile float idleEntryDeviationPsi; // Allowed deviation from target to count as stable
-    volatile uint16_t idleEntrySeconds;   // Seconds of stable pressure before idle
-    
-    // Outputs (written by motor task, read by display task)
-    volatile float currentPsi;          // Current pressure reading
-    volatile int32_t rawPressure;       // Raw 24-bit pressure value
-    volatile float smoothedPsi;         // Smoothed pressure
-    volatile uint16_t motorSpeed;       // Current motor speed 0-1000
-    volatile float pidOutput;           // Raw PID output
-    volatile bool pressureValid;        // Pressure sensor status
-    volatile uint32_t idleSecondsRemaining; // Seconds until power pause activates
-    volatile uint8_t idleState;        // Current power pause state
-    volatile bool idleExitRequest;      // Request exit from power pause
-    volatile uint32_t loopCount;        // Motor loop iteration count
-    volatile uint32_t loopTimeUs;       // Actual loop time in microseconds
-    volatile uint32_t maxLoopTimeUs;    // Maximum loop time observed
-    
-    // Synchronization
-    portMUX_TYPE mutex;                 // Spinlock for atomic access
+    // Inputs — written by display task, read by motor task
+    volatile float    targetPsi;
+    volatile bool     motorEnabled;
+    volatile bool     pidResetRequest;
+    volatile bool     pidGainsChanged;
+    volatile float    pidKp;
+    volatile float    pidKi;
+    volatile float    pidKd;
+    volatile float    idleEntryDeviationPsi;
+    volatile uint16_t idleEntrySeconds;
+
+    // Outputs — written by motor task, read by display task
+    volatile float    currentPsi;
+    volatile int32_t  rawPressure;
+    volatile float    smoothedPsi;
+    volatile uint16_t motorSpeed;
+    volatile float    pidOutput;
+    volatile bool     pressureValid;
+    volatile uint32_t idleSecondsRemaining;
+    volatile uint8_t  idleState;
+    volatile bool     idleExitRequest;
+    volatile bool     isMax;            // true when running in MAX mode (target >= MAX_PSI_THRESHOLD)
+    volatile uint32_t loopCount;
+    volatile uint32_t loopTimeUs;
+    volatile uint32_t maxLoopTimeUs;
+
+    portMUX_TYPE mutex;
 } MotorSharedData;
 
-// Global shared data instance
 extern MotorSharedData motorShared;
 
 /**
- * @brief Initialize the dual-core motor control system
- * 
- * Creates a high-priority task on Core 0 for motor control
- * 
- * @return true if initialization successful
+ * @brief Create the motor control task on Core 0.
+ * @return true on success
  */
 bool dualCoreMotorInit(void);
 
-/**
- * @brief Set target pressure (thread-safe)
- * @param psi Target pressure in PSI
- */
+/** @brief Set target pressure (thread-safe). */
 void setTargetPressureSafe(float psi);
 
-/**
- * @brief Get current pressure (thread-safe)
- * @return Current smoothed pressure in PSI
- */
+/** @brief Get smoothed pressure (thread-safe). */
 float getCurrentPressureSafe(void);
 
-/**
- * @brief Get raw sensor pressure (thread-safe)
- * @param pressurePsi Pointer to store raw pressure in PSI
- * @param valid Pointer to store sensor validity
- */
+/** @brief Get raw sensor reading (thread-safe). */
 void getRawPressureSafe(float *pressurePsi, int32_t *rawValue, bool *valid);
 
-/**
- * @brief Get motor speed (thread-safe)
- * @return Motor speed 0-1000
- */
+/** @brief Get motor speed (thread-safe). */
 uint16_t getMotorSpeedSafe(void);
 
-/**
- * @brief Get motor loop timing stats (thread-safe)
- * @param avgUs Pointer to store average loop time
- * @param maxUs Pointer to store maximum loop time
- */
+/** @brief Get motor loop timing stats (thread-safe). */
 void getMotorLoopStats(uint32_t *avgUs, uint32_t *maxUs);
 
-/**
- * @brief Request PID reset (thread-safe)
- */
+/** @brief Request a PID reset (thread-safe). */
 void requestPidReset(void);
 
-/**
- * @brief Enable/disable motor (thread-safe)
- * @param enable true to enable motor
- */
+/** @brief Enable or disable the motor (thread-safe). */
 void setMotorEnabledSafe(bool enable);
 
-/**
- * @brief Set PID gains (thread-safe) - syncs to motor task
- * @param kp Proportional gain
- * @param ki Integral gain
- * @param kd Derivative gain
- */
+/** @brief Set PID gains (thread-safe). */
 void setPidGainsSafe(float kp, float ki, float kd);
 
-/**
- * @brief Get PID gains from motor task (thread-safe)
- * @param kp Pointer to store Kp value
- * @param ki Pointer to store Ki value
- * @param kd Pointer to store Kd value
- */
+/** @brief Read PID gains (thread-safe). */
 void getPidGainsSafe(float *kp, float *ki, float *kd);
 
-/**
- * @brief Set idle entry duration (thread-safe)
- * @param seconds Seconds of stable pressure before idle
- */
+/** @brief Set idle entry duration (thread-safe). */
 void setIdleEntrySecondsSafe(uint16_t seconds);
 
-/**
- * @brief Get idle entry duration (thread-safe)
- * @return Seconds of stable pressure before idle
- */
+/** @brief Get idle entry duration (thread-safe). */
 uint16_t getIdleEntrySecondsSafe(void);
 
+/** @brief Set idle entry deviation band (thread-safe). */
 void setIdleEntryDeviationSafe(float deviationPsi);
+
+/** @brief Get idle entry deviation band (thread-safe). */
 float getIdleEntryDeviationSafe(void);
 
-/**
- * @brief Request exit from power pause (thread-safe)
- */
+/** @brief Request exit from power pause (thread-safe). */
 void requestIdleExitSafe(void);
+
 #endif // DUAL_CORE_MOTOR_H

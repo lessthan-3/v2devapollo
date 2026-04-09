@@ -4,6 +4,7 @@
  */
 
 #include "pid_controller.h"
+#include "config.h"
 
 // NVS Preferences instance for storing parameters
 static Preferences pidPrefs;
@@ -86,13 +87,27 @@ float pidCalculate(PidController *pid, float currentValue) {
         return 0.0f;
     }
     
+    // Low-PSI gain scaling: linearly reduce gains below LOW_PSI_THRESHOLD to
+    // prevent overshoot at low setpoints where motor momentum is significant
+    // relative to the target pressure.
+    float gainScale = 1.0f;
+    float Ki_gainScale = 1.0f;
+    if (pid->setpoint > 0.0f && pid->setpoint < LOW_PSI_THRESHOLD) {
+        // Scale from LOW_PSI_GAIN_SCALE at 0 PSI to 1.0 at LOW_PSI_THRESHOLD
+        gainScale = LOW_PSI_GAIN_SCALE + (1.0f - LOW_PSI_GAIN_SCALE) * (pid->setpoint / LOW_PSI_THRESHOLD);
+        Ki_gainScale = LOW_PSI_KI_GAIN_SCALE + (1.0f - LOW_PSI_KI_GAIN_SCALE) * (pid->setpoint / LOW_PSI_THRESHOLD);
+    }
+    float effectiveKp = pid->kp * gainScale;
+    float effectiveKi = pid->ki * Ki_gainScale;
+    float effectiveKd = pid->kd * gainScale;
+
     // Calculate proportional term
-    float proportional = pid->kp * error;
+    float proportional = effectiveKp * error;
     
     // Calculate derivative term (before updating integral to check rate limiting)
     float derivative = 0.0f;
     if (pid->dt > 0.0f) {
-        derivative = pid->kd * (error - pid->prevError) / pid->dt;
+        derivative = effectiveKd * (error - pid->prevError) / pid->dt;
     }
     
     // Calculate what output would be without integral
@@ -112,7 +127,7 @@ float pidCalculate(PidController *pid, float currentValue) {
     }
     
     // Calculate integral term
-    float integral = pid->ki * pid->integral;
+    float integral = effectiveKi * pid->integral;
     
     // Store error for next derivative calculation
     pid->prevError = error;
@@ -189,15 +204,6 @@ bool pidLoadGains(PidController *pid) {
     return false;
 }
 
-void pidMarkAsLearned(PidController *pid, bool saveNow) {
-    pid->hasStoredParams = true;
-    Serial.println("PID: Parameters marked for storage");
-    
-    if (saveNow) {
-        pidSaveGains(pid);
-    }
-}
-
 void pidResetToDefaults(PidController *pid) {
     // Reset gains to defaults
     pid->kp = PID_KP_DEFAULT;
@@ -241,14 +247,3 @@ void pidDebugPrint(PidController *pid) {
     Serial.println("-----------------------------");
 }
 
-// Legacy compatibility stubs
-void pidEnableLearning(PidController *pid, bool enable) {
-    (void)pid;
-    (void)enable;
-    // No-op - learning removed
-}
-
-bool pidIsLearningEnabled(PidController *pid) {
-    (void)pid;
-    return false;  // Learning removed
-}

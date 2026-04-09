@@ -32,6 +32,7 @@ MotorSharedData motorShared = {
     .idleSecondsRemaining = UINT32_MAX,
     .idleState = IDLE_STATE_OFF,
     .idleExitRequest = false,
+    .isMax = false,
     .loopCount = 0,
     .loopTimeUs = 0,
     .maxLoopTimeUs = 0,
@@ -90,8 +91,9 @@ void motorControlTask(void *parameter) {
     uint32_t idleCounter = 0;
     uint32_t idleStableCounter = 0;
     uint16_t idleHoldSpeed = 0;
+    float maxPressureRecorded = 0.0f;  // tracks peak pressure for MAX-mode power pause
 
-    const uint32_t idleStableLoops = (IDLE_STABLE_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US / 6;
+    const uint32_t idleStableLoops = (IDLE_STABLE_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
     
     // Main motor control loop
     while (true) {
@@ -127,7 +129,7 @@ void motorControlTask(void *parameter) {
         idleEntryDeviation = motorShared.idleEntryDeviationPsi;
         idleEntrySeconds = motorShared.idleEntrySeconds;
         portEXIT_CRITICAL(&motorShared.mutex);
-        uint32_t idleEntryLoops = (idleEntrySeconds * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
+        uint32_t idleEntryLoops = (uint32_t)idleEntrySeconds * (1000000UL / MOTOR_LOOP_INTERVAL_US);
         
         if (resetRequested) {
             pidReset(&motorPid);
@@ -143,7 +145,7 @@ void motorControlTask(void *parameter) {
         
         uint16_t speed = 0;
         bool valid = reading.valid;
-        if (valid && enabled) {
+        if (valid && enabled && target > 0.0f) {
             // Exponential moving average smoothing
             smoothedPressure = (smoothingAlpha * reading.pressurePsi) + 
                                ((1.0f - smoothingAlpha) * smoothedPressure);
@@ -152,15 +154,17 @@ void motorControlTask(void *parameter) {
                 idleState = IDLE_STATE_OFF;
                 idleCounter = 0;
                 idleStableCounter = 0;
+                maxPressureRecorded = 0.0f;
                 pidReset(&motorPid);
             }
             
             bool inActiveBand = fabsf(smoothedPressure - target) <= idleEntryDeviation;
-            if (idleState == IDLE_STATE_OFF) {
-                // Only count idle ticks when target PSI is above minimum (not at 0 in menu)
-                if (inActiveBand && target > 0.0f) {
+            bool isMaxMode = (target >= MAX_PSI_THRESHOLD);
+            if (idleState == IDLE_STATE_OFF && !isMaxMode) {
+                // Only count idle ticks when target PSI is above idle PSI (power pause is pointless below it)
+                if (inActiveBand && target > IDLE_TARGET_PSI) {
                     if (idleCounter < idleEntryLoops) {
-                        idleCounter++;
+                        idleCounter += IDLE_LOOP_INCREMENT;
                     }
                 } else if (idleCounter > 0) {
                     if (idleCounter > IDLE_ENTRY_DECREASE) {
@@ -184,7 +188,7 @@ void motorControlTask(void *parameter) {
             uint32_t idleSecondsRemaining = 0;
             if (idleState == IDLE_STATE_OFF && idleEntryLoops > 0) {
                 uint32_t remainingLoops = (idleCounter < idleEntryLoops) ? (idleEntryLoops - idleCounter) : 0;
-                idleSecondsRemaining = (remainingLoops * MOTOR_LOOP_INTERVAL_US) / 1000000UL;
+                idleSecondsRemaining = (remainingLoops * MOTOR_LOOP_INTERVAL_US + 999999UL) / 1000000UL;
             } else if (idleState == IDLE_STATE_OFF && idleEntryLoops == 0) {
                 idleSecondsRemaining = 0;
             } else {
@@ -229,14 +233,59 @@ void motorControlTask(void *parameter) {
                     pidReset(&motorPid);
                 }
             } else {
-                motorPid.setpoint = target;
-                pidOut = pidCalculate(&motorPid, smoothedPressure);
-                int adjustedSpeed = (int)lastSpeed + (int)lroundf(pidOut);
-                //uint16_t maxSpeed = calculateMaxSpeedFromTarget(target);
-                adjustedSpeed = constrain(adjustedSpeed, 100, 1000);
-                speed = (uint16_t)adjustedSpeed;
-                setMotorSpeed(speed);
-                lastSpeed = speed;
+                if (isMaxMode) {
+                    // MAX mode: run turbine at full power
+                    speed = 1000;
+                    setMotorSpeed(speed);
+                    lastSpeed = speed;
+                    pidOut = 1000.0f;
+
+                    // Track peak pressure for deviation-based idle entry
+                    if (smoothedPressure > maxPressureRecorded) {
+                        maxPressureRecorded = smoothedPressure;
+                    }
+
+                    // Idle entry: pressure stays within MAX_PRESSURE_DEVIATION_PSI of the recorded peak
+                    if (smoothedPressure >= maxPressureRecorded - MAX_PRESSURE_DEVIATION_PSI) {
+                        if (idleCounter < idleEntryLoops) {
+                            idleCounter++;
+                        }
+                    } else if (idleCounter >= IDLE_ENTRY_DECREASE) {
+                        // Pressure deviated significantly — decrement counter slowly
+                        idleCounter -= IDLE_ENTRY_DECREASE;
+                    } else {
+                        // Large drop: reset peak and counter
+                        idleCounter = 0;
+                        maxPressureRecorded = smoothedPressure;
+                    }
+
+                    if (idleCounter >= idleEntryLoops && idleEntryLoops > 0) {
+                        idleState = IDLE_STATE_PID_RAMP;
+                        idleCounter = 0;
+                        idleStableCounter = 0;
+                        idleHoldSpeed = 0;
+                        maxPressureRecorded = 0.0f;
+                        pidReset(&motorPid);
+                    }
+                } else {
+                    // Normal PID mode
+                    maxPressureRecorded = 0.0f;  // reset when leaving MAX mode
+                    motorPid.setpoint = target;
+                    pidOut = pidCalculate(&motorPid, smoothedPressure);
+                    int adjustedSpeed = (int)lastSpeed + (int)lroundf(pidOut);
+                    // Cap the upper bound to a setpoint-proportional ceiling.
+                    // Below 3 PSI this prevents the motor from over-driving and
+                    // building pressure past the setpoint before PID can react.
+                    // int speedCeil = (int)calculateMaxSpeedFromTarget(target);
+                    // adjustedSpeed = constrain(adjustedSpeed, 50, speedCeil);
+                    
+                    //no constraint 
+                    adjustedSpeed = constrain(adjustedSpeed, 50, 1000);
+
+                    speed = (uint16_t)adjustedSpeed;
+                    setMotorSpeed(speed);
+                    lastSpeed = speed;
+                }
             }
 
             portENTER_CRITICAL(&motorShared.mutex);
@@ -248,14 +297,17 @@ void motorControlTask(void *parameter) {
             motorShared.pressureValid = true;
             motorShared.idleSecondsRemaining = idleSecondsRemaining;
             motorShared.idleState = idleState;
+            motorShared.isMax = (target >= MAX_PSI_THRESHOLD);
             portEXIT_CRITICAL(&motorShared.mutex);
-        } else if (!enabled) {
-            // Motor disabled - set speed to 0
+        } else if (!enabled || target == 0.0f) {
+            // Motor disabled or target set to zero — keep motor off
             setMotorSpeed(0);
             lastSpeed = 0;
+            pidReset(&motorPid);
             idleState = IDLE_STATE_OFF;
             idleCounter = 0;
             idleStableCounter = 0;
+            maxPressureRecorded = 0.0f;
             
             portENTER_CRITICAL(&motorShared.mutex);
             motorShared.motorSpeed = 0;

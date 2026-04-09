@@ -4,6 +4,7 @@
  */
 
 #include "motor_control.h"
+#include "config.h"
 #include <math.h>
 
 // Global motor control state
@@ -23,19 +24,6 @@ static hw_timer_t *triacTimer = NULL;
 
 #ifdef SIMULATE_AC_60HZ
 static hw_timer_t *zcSimTimer = NULL;
-#endif
-
-// Debug reporting variables
-static unsigned long lastDebugReport = 0;
-static uint32_t lastReportedCount = 0;
-
-#ifdef TRIAC_DEBUG_SERIAL
-static volatile uint32_t triacFireCount = 0;
-static volatile uint32_t triacTimerArmCount = 0;
-static volatile uint32_t triacTimerSkipCount = 0;
-static uint32_t lastReportedTriacFireCount = 0;
-static uint32_t lastReportedTriacArmCount = 0;
-static uint32_t lastReportedTriacSkipCount = 0;
 #endif
 
 // Frequency detection variables
@@ -161,10 +149,6 @@ bool motorControlInit() {
     motorState.motorPwm = motorState.maxDelay;
     motorState.motorEnabled = false;
     
-    // Reset debug reporting
-    lastDebugReport = millis();
-    lastReportedCount = 0;
-    
     Serial.println("Motor Control: Initialization complete");
     return true;
      
@@ -222,7 +206,6 @@ void resetZeroCrossingCount() {
     noInterrupts();
     motorState.zeroCrossingCount = 0;
     interrupts();
-    lastReportedCount = 0;
     Serial.println("Motor Control: Zero crossing count reset");
 }
 
@@ -284,52 +267,6 @@ AcFrequency detectAcFrequency() {
     return motorState.acFrequency;
 }
 
-void motorControlDebugReport() {
-    unsigned long now = millis();
-    
-    if (now - lastDebugReport >= DEBUG_REPORT_INTERVAL_MS) {
-        uint32_t currentCount = motorState.zeroCrossingCount;
-        uint32_t countDelta = currentCount - lastReportedCount;
-        
-        // Calculate frequency from count delta
-        float measuredFreq = (float)countDelta / (DEBUG_REPORT_INTERVAL_MS / 1000.0f) / 2.0f;  // Divide by 2 because 2 ZC per cycle
-        
-        Serial.println("--- Motor Control Debug ---");
-        Serial.printf("  Zero Crossings: %lu (total), +%lu (last %d sec)\n", 
-                      currentCount, countDelta, DEBUG_REPORT_INTERVAL_MS / 1000);
-        Serial.printf("  Measured AC Freq: %.1f Hz\n", measuredFreq);
-        Serial.printf("  Motor Speed: %u.%u%%, PWM Delay: %u us\n", 
-                  motorState.motorSpeed / 10, motorState.motorSpeed % 10, motorState.motorPwm);
-        Serial.printf("  Motor Enabled: %s, Max Delay: %u us\n",
-                      motorState.motorEnabled ? "YES" : "NO", motorState.maxDelay);
-    #ifdef TRIAC_DEBUG_SERIAL
-        uint32_t fireCount = triacFireCount;
-        uint32_t armCount = triacTimerArmCount;
-        uint32_t skipCount = triacTimerSkipCount;
-        Serial.printf("  Triac Fires: %lu (total), +%lu\n",
-                  fireCount, fireCount - lastReportedTriacFireCount);
-        Serial.printf("  Triac Arms: %lu (total), +%lu\n",
-                  armCount, armCount - lastReportedTriacArmCount);
-        Serial.printf("  Triac Skips: %lu (total), +%lu\n",
-                  skipCount, skipCount - lastReportedTriacSkipCount);
-        lastReportedTriacFireCount = fireCount;
-        lastReportedTriacArmCount = armCount;
-        lastReportedTriacSkipCount = skipCount;
-    #endif
-        Serial.println("---------------------------");
-        
-        lastReportedCount = currentCount;
-        lastDebugReport = now;
-    }
-}
-
-void fireTriac() {
-    // Manual triac firing (for testing)
-    digitalWrite(TRIAC_GATE_PIN, HIGH);
-    delayMicroseconds(TRIAC_PULSE_US);
-    digitalWrite(TRIAC_GATE_PIN, LOW);
-}
-
 // ============================================================================
 // PID-Based Pressure Control Implementation
 // ============================================================================
@@ -384,10 +321,3 @@ PidController* getPressurePid() {
     return &pressurePid;
 }
 
-void setPidLearning(bool enable) {
-    pidEnableLearning(&pressurePid, enable);
-}
-
-bool isPidLearningEnabled() {
-    return pidIsLearningEnabled(&pressurePid);
-}

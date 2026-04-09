@@ -5,8 +5,6 @@
 
 #include "temp_sensor.h"
 
-#define TEMP_CALIBRATION_OFFSET 39.0f  // Adjust this offset based on calibration
-
 int analogRead(unsigned char pin);
 
 void tempSensorInit(void) {
@@ -23,6 +21,6 @@ uint16_t tempSensorReadAdc(void) {
 
 float tempSensorReadC(void) {
   uint16_t adcValue = tempSensorReadAdc();
-  float tempC = ((float)adcValue - (float)TEMP_OFFSET) * (float)TEMP_MULT / (float)TEMP_DIVISOR;
-  return tempC;
+  // Linear calibration: tempC = -1.75 * adcValue + 207.0
+  return -1.75f * (float)adcValue + 207.0f;
 }

@@ -1,152 +1,14 @@
 #include "display_ui.h"
 #include "motor_control.h"
 #include "splash_image.h"
+#include "qr_images.h"
+#include "config.h"
 #include <math.h>
 #include <stdint.h>
 
-extern float targetPsi;
-extern unsigned long minMaxFlashStart;
-extern bool showingMinMax;
-extern bool isMinNotMax;
-extern EncoderMode currentEncoderMode;
-extern uint32_t sessionStartMillis;
-extern uint32_t totalRuntimeTenths;
-extern unsigned long pidLoopIntervalMs;
-extern float currentTemperatureC;
 extern bool overTempActive;
 
 // Old UI functions removed - using new Runtime UI design
-
-void drawDebugInfo() {
-  static uint16_t lastMotorSpeed = 0xFFFF;
-  static AcFrequency lastAcFreq = AC_FREQ_UNKNOWN;
-  static unsigned long lastLoopTime = 9999;
-  static float lastKp = -1, lastKi = -1, lastKd = -1;
-  static uint32_t lastZcCount = 0xFFFFFFFF;
-
-  uint16_t motorSpeed = motorState.motorSpeed;
-  AcFrequency acFreq = motorState.acFrequency;
-  uint32_t zeroCrossingCount = getZeroCrossingCount();
-  PidController* pid = getPressurePid();
-  float kp, ki, kd;
-  pidGetGains(pid, &kp, &ki, &kd);
-
-  if (motorSpeed != lastMotorSpeed) {
-    lastMotorSpeed = motorSpeed;
-    tft.fillRect(LEFT_COLUMN_X + 80, STATUS_ZONE_Y + 18, 50, 25, COLOR_BG);
-    tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
-    tft.setTextSize(2);
-    tft.setCursor(LEFT_COLUMN_X + 80, STATUS_ZONE_Y + 22);
-    tft.printf("%3u.%1u%%", motorSpeed / 10, motorSpeed % 10);
-  }
-
-  if (acFreq != lastAcFreq) {
-    lastAcFreq = acFreq;
-    tft.fillRect(LEFT_COLUMN_X + 140, STATUS_ZONE_Y + 18, 50, 25, COLOR_BG);
-    tft.setTextColor(TFT_WHITE, COLOR_BG);
-    tft.setTextSize(2);
-    tft.setCursor(LEFT_COLUMN_X + 140, STATUS_ZONE_Y + 22);
-    if (acFreq == AC_FREQ_UNKNOWN) {
-      tft.print("--");
-    } else {
-      tft.printf("%2d", acFreq);
-    }
-  }
-
-  if (pidLoopIntervalMs != lastLoopTime) {
-    lastLoopTime = pidLoopIntervalMs;
-    tft.fillRect(LEFT_COLUMN_X + 200, STATUS_ZONE_Y + 18, 60, 25, COLOR_BG);
-    tft.setTextColor(TFT_WHITE, COLOR_BG);
-    tft.setTextSize(2);
-    tft.setCursor(LEFT_COLUMN_X + 200, STATUS_ZONE_Y + 22);
-    tft.printf("%3lu", pidLoopIntervalMs);
-  }
-
-  if (fabsf(kp - lastKp) > 0.01f || fabsf(ki - lastKi) > 0.01f || fabsf(kd - lastKd) > 0.01f) {
-    lastKp = kp;
-    lastKi = ki;
-    lastKd = kd;
-    tft.fillRect(LEFT_COLUMN_X + 280, STATUS_ZONE_Y + 18, 190, 25, COLOR_BG);
-    tft.setTextColor(COLOR_DEBUG, COLOR_BG);
-    tft.setTextSize(2);
-    tft.setCursor(LEFT_COLUMN_X + 280, STATUS_ZONE_Y + 22);
-    char pidStr[24];
-    snprintf(pidStr, sizeof(pidStr), "%.0f/%.1f/%.1f", kp, ki, kd);
-    tft.print(pidStr);
-  }
-
-  if (zeroCrossingCount != lastZcCount) {
-    lastZcCount = zeroCrossingCount;
-    tft.fillRect(LEFT_COLUMN_X + 50, STATUS_ZONE_Y + 32, 140, 16, COLOR_BG);
-    tft.setTextColor(TFT_WHITE, COLOR_BG);
-    tft.setTextSize(1);
-    tft.setCursor(LEFT_COLUMN_X + 50, STATUS_ZONE_Y - 28);
-    tft.printf("%lu", (unsigned long)zeroCrossingCount);
-  }
-}
-
-const char* getModeName(EncoderMode mode) {
-  switch (mode) {
-    case MODE_TARGET_PRESSURE: return "TARGET";
-    case MODE_KP: return "Kp";
-    case MODE_KI: return "Ki";
-    case MODE_KD: return "Kd";
-    default: return "???";
-  }
-}
-
-void drawModeIndicator() {
-  static EncoderMode lastMode = MODE_COUNT;
-
-  if (lastMode == currentEncoderMode) {
-    unsigned long sessionMs = millis() - sessionStartMillis;
-    unsigned long sessionMin = sessionMs / 60000;
-    unsigned long sessionHr = sessionMin / 60;
-    sessionMin %= 60;
-
-    tft.fillRect(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 55, 100, 30, COLOR_BG);
-    tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
-    tft.setTextSize(1);
-    tft.setCursor(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 55);
-    tft.printf("Sess: %lu:%02lu", sessionHr, sessionMin);
-    tft.setCursor(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 68);
-    tft.printf("Total: %lu.%lu hr", totalRuntimeTenths / 10, totalRuntimeTenths % 10);
-    return;
-  }
-  lastMode = currentEncoderMode;
-
-  tft.fillRect(0, STATUS_ZONE_Y + 50, SCREEN_WIDTH, 30, COLOR_BG);
-
-  tft.setTextSize(2);
-  tft.setCursor(LEFT_COLUMN_X, STATUS_ZONE_Y + 55);
-
-  tft.setTextColor(TFT_BLACK, COLOR_MENU_EDIT);
-  tft.printf(" MODE: %s ", getModeName(currentEncoderMode));
-
-  tft.setCursor(LEFT_COLUMN_X + 150, STATUS_ZONE_Y + 55);
-  for (int i = 0; i < MODE_COUNT; i++) {
-    if (i == currentEncoderMode) {
-      tft.setTextColor(TFT_BLACK, TFT_GREEN);
-    } else {
-      tft.setTextColor(TFT_DARKGREY, COLOR_BG);
-    }
-    tft.printf("[%d]", i);
-  }
-
-  unsigned long sessionMs = millis() - sessionStartMillis;
-  unsigned long sessionMin = sessionMs / 60000;
-  unsigned long sessionHr = sessionMin / 60;
-  sessionMin %= 60;
-
-  tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
-  tft.setTextSize(1);
-  tft.setCursor(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 55);
-  tft.printf("Sess: %lu:%02lu", sessionHr, sessionMin);
-  tft.setCursor(SCREEN_WIDTH - 100, STATUS_ZONE_Y + 68);
-  tft.printf("Total: %lu.%lu hr", totalRuntimeTenths / 10, totalRuntimeTenths % 10);
-}
-
-// flashMinMax and updateMinMaxFlash removed - no longer used in new UI
 
 void drawStartupScreen() {
   tft.fillScreen(COLOR_BG);
@@ -176,6 +38,115 @@ void drawSettingsFooter(const char* message, uint16_t color) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Menu icon helpers
+// Each draws a ~14px-radius icon centred at (cx, cy) in the given colour.
+// ---------------------------------------------------------------------------
+
+// ⚙  Cog / gear icon – ring with 8 evenly spaced rectangular teeth
+static void drawIconCog(int cx, int cy, int r, uint16_t color) {
+  // Outer ring (teeth approximated as short filled rects around the circle)
+  tft.drawCircle(cx, cy, r - 4, color);
+  tft.drawCircle(cx, cy, r - 5, color);
+  // 8 teeth: short rectangles projected outward from the ring
+  const float PI2 = 6.28318f;
+  for (uint8_t t = 0; t < 8; t++) {
+    float angle = (PI2 / 8.0f) * t;
+    float ca = cosf(angle), sa = sinf(angle);
+    int x0 = cx + (int)roundf(ca * (r - 6));
+    int y0 = cy + (int)roundf(sa * (r - 6));
+    int x1 = cx + (int)roundf(ca * r);
+    int y1 = cy + (int)roundf(sa * r);
+    tft.drawLine(x0, y0, x1, y1, color);
+    // Widen the tooth by one pixel each side
+    float px = -sa, py = ca;
+    tft.drawLine(x0 + (int)roundf(px), y0 + (int)roundf(py),
+                 x1 + (int)roundf(px), y1 + (int)roundf(py), color);
+  }
+  // Small centre hole
+  tft.fillCircle(cx, cy, r / 4, color);
+  tft.fillCircle(cx, cy, r / 4 - 2, COLOR_BG);
+}
+
+// ?  Question-mark-in-circle icon
+static void drawIconQuestion(int cx, int cy, int r, uint16_t color) {
+  tft.drawCircle(cx, cy, r,     color);
+  tft.drawCircle(cx, cy, r - 1, color);
+  // "?" stem and dot drawn with primitives
+  // Curve of the ?  – small arc at top
+  tft.drawCircle(cx, cy - r / 4, r / 3, color);
+  // Erase the bottom half of that arc so it looks like a hook
+  tft.fillRect(cx - r / 3 - 1, cy - r / 4, (r / 3) * 2 + 2, r / 3 + 2, COLOR_BG);
+  // Re-draw outer ring over the fill
+  tft.drawCircle(cx, cy, r,     color);
+  tft.drawCircle(cx, cy, r - 1, color);
+  // Vertical stem drop
+  tft.fillRect(cx - 1, cy - r / 4 + r / 3 - 2, 3, r / 4, color);
+  // Dot
+  tft.fillRect(cx - 1, cy + r / 4 + 1, 3, 3, color);
+}
+
+// i  Info-in-circle icon
+static void drawIconInfo(int cx, int cy, int r, uint16_t color) {
+  tft.drawCircle(cx, cy, r,     color);
+  tft.drawCircle(cx, cy, r - 1, color);
+  // Top dot of the "i"
+  tft.fillRect(cx - 1, cy - r / 2 - 1, 3, 3, color);
+  // Vertical bar of the "i"
+  tft.fillRect(cx - 1, cy - r / 4, 3, r / 2 + 1, color);
+  // Small serif base
+  tft.fillRect(cx - 3, cy + r / 4 + 1, 7, 2, color);
+}
+
+// ▶  Play / triangle icon (filled)
+static void drawIconPlay(int cx, int cy, int r, uint16_t color) {
+  // Vertices: tip at right, flat vertical edge at left
+  int tipX  = cx + r;
+  int leftX = cx - r / 2;
+  int topY  = cy - r;
+  int botY  = cy + r;
+  // Scanline fill: for each row interpolate the right edge between
+  // (leftX, topY) -> (tipX, cy)  for the upper half, and
+  // (tipX, cy)    -> (leftX, botY) for the lower half.
+  for (int row = topY; row <= botY; row++) {
+    int rx;
+    if (row <= cy) {
+      float t = (cy - topY > 0) ? (float)(row - topY) / (float)(cy - topY) : 1.0f;
+      rx = leftX + (int)roundf(t * (tipX - leftX));
+    } else {
+      float t = (botY - cy > 0) ? (float)(row - cy)  / (float)(botY - cy)  : 1.0f;
+      rx = tipX + (int)roundf(t * (leftX - tipX));
+    }
+    tft.drawFastHLine(leftX, row, rx - leftX + 1, color);
+  }
+}
+
+// 🕐  Clock icon – circle with hour/minute hands
+static void drawIconClock(int cx, int cy, int r, uint16_t color) {
+  tft.drawCircle(cx, cy, r,     color);
+  tft.drawCircle(cx, cy, r - 1, color);
+  // Minute hand: pointing to 12 (straight up)
+  tft.drawLine(cx, cy, cx, cy - (r - 3), color);
+  // Hour hand: pointing to ~3 (straight right, shorter)
+  tft.drawLine(cx, cy, cx + (r - 5), cy, color);
+  // Centre dot
+  tft.fillCircle(cx, cy, 2, color);
+}
+
+// Draw the appropriate icon for a given menu index
+static void drawMenuIcon(uint8_t menuIdx, int cx, int cy, uint16_t color) {
+  switch (menuIdx) {
+    case 0: drawIconPlay(cx, cy, 11, color);     break;  // Start Motor
+    case 1: drawIconCog(cx, cy, 13, color);      break;  // Settings
+    case 2: drawIconClock(cx, cy, 13, color);    break;  // Timers
+    case 3: drawIconQuestion(cx, cy, 13, color); break;  // Support
+    case 4: drawIconInfo(cx, cy, 13, color);     break;  // About
+    default: break;
+  }
+}
+
+// ---------------------------------------------------------------------------
+
 void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   static uint8_t lastMenuIndex = 255;
   if (!forceRedraw && lastMenuIndex == menuIndex) {
@@ -187,90 +158,34 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
   tft.setTextSize(3);
   tft.setCursor(185, 30);
-  tft.print("MENU");
+  tft.print("MAIN MENU");
 
-  const char* options[MENU_OPTION_COUNT] = {"Start Motor", "Settings", "SUPPORT", "About"};
+  const char* options[MENU_OPTION_COUNT] = {"Start Motor", "Settings", "Timers", "Support", "About"};
   for (uint8_t i = 0; i < MENU_OPTION_COUNT; i++) {
     int y = MENU_TOP_Y + (i * MENU_OPTION_HEIGHT);
+    // Vertical centre of the row for icon placement
+    int rowCy = y + (MENU_OPTION_HEIGHT / 2) - 5;
+
     if (i == menuIndex) {
+      // Highlight only the text area; keep the icon gutter clear
       tft.fillRect(40, y - 5, SCREEN_WIDTH - 80, MENU_OPTION_HEIGHT, COLOR_MENU_SELECT);
+      tft.fillRect(0, y - 5, 40, MENU_OPTION_HEIGHT, COLOR_BG);
       tft.setTextColor(TFT_BLACK, COLOR_MENU_SELECT);
     } else {
+      tft.fillRect(0, y - 5, 40, MENU_OPTION_HEIGHT, COLOR_BG);
       tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
     }
+
+    // Icon always drawn on black background, colour-matched to selection state
+    uint16_t iconColor = (i == menuIndex) ? COLOR_TEXT_PRIMARY : COLOR_TEXT_SECONDARY;
+    drawMenuIcon(i, 20, rowCy, iconColor);
+
     tft.setTextSize(2);
     tft.setCursor(60, y);
     tft.print(options[i]);
   }
 
   drawMenuFooter("Press to select", COLOR_SUCCESS);
-}
-
-void drawSettingsScreen(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool editing, bool forceRedraw) {
-  static uint8_t lastIndex = 255;
-  static float lastKp = -1.0f;
-  static float lastKi = -1.0f;
-  static float lastKd = -1.0f;
-  static float lastIdleDev = -1.0f;
-  static float lastStartPsi = -1.0f;
-  static bool lastEditing = false;
-
-  if (!forceRedraw && lastIndex == settingsIndex && lastEditing == editing &&
-      fabsf(kp - lastKp) < 0.01f && fabsf(ki - lastKi) < 0.01f && fabsf(kd - lastKd) < 0.01f &&
-      fabsf(idleDev - lastIdleDev) < 0.01f && fabsf(startPsi - lastStartPsi) < 0.01f) {
-    return;
-  }
-
-  lastIndex = settingsIndex;
-  lastEditing = editing;
-  lastKp = kp;
-  lastKi = ki;
-  lastKd = kd;
-  lastIdleDev = idleDev;
-  lastStartPsi = startPsi;
-
-  tft.fillScreen(COLOR_BG);
-  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.setTextSize(3);
-  tft.setCursor(150, 20);
-  tft.print("SETTINGS");
-
-  for (uint8_t i = 0; i < SETTINGS_OPTION_COUNT; i++) {
-    bool selected = (i == settingsIndex);
-    drawSettingsRow(i, kp, ki, kd, idleDev, startPsi, selected, editing);
-  }
-
-  if (editing) {
-    drawSettingsFooter("Rotate to adjust, press to exit", COLOR_MENU_EDIT);
-  } else {
-    drawSettingsFooter("Press to edit / select", COLOR_SUCCESS);
-  }
-}
-
-void drawSettingsRow(uint8_t settingsIndex, float kp, float ki, float kd, float idleDev, float startPsi, bool selected, bool editing) {
-  const char* options[SETTINGS_OPTION_COUNT] = {
-    "Power Pause Timeout",
-    "Pause Warning Sound", 
-    "Units",
-    "Exit Settings"
-  };
-  
-  int y = SETTINGS_TOP_Y + (settingsIndex * SETTINGS_OPTION_HEIGHT);
-  uint16_t bg = COLOR_BG;
-  uint16_t fg = COLOR_TEXT_PRIMARY;
-  if (selected) {
-    bg = editing ? COLOR_MENU_EDIT : COLOR_MENU_SELECT;
-    fg = TFT_BLACK;
-  }
-
-  tft.fillRect(40, y - 5, SCREEN_WIDTH - 80, SETTINGS_OPTION_HEIGHT, bg);
-  tft.setTextColor(fg, bg);
-  tft.setTextSize(2);
-  tft.setCursor(60, y);
-  tft.print(options[settingsIndex]);
-
-  // Note: Values will be managed by main.cpp state
-  // Placeholder for now - actual implementation in main.cpp
 }
 
 void drawPowerPauseSettingsFooter(const char* message, uint16_t color) {
@@ -308,7 +223,7 @@ void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, 
   tft.setTextColor(TFT_WHITE, COLOR_BG);
   tft.setTextSize(3);
   tft.setCursor(110, 20);
-  tft.print("POWER PAUSE SETTINGS");
+  tft.print("SETTINGS");
 
   for (uint8_t i = 0; i < 4; i++) {
     bool selected = (i == settingsIndex);
@@ -323,7 +238,7 @@ void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, 
 }
 
 void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, DisplayUnits units, bool selected, bool editing) {
-  const char* options[4] = {"Pause Timeout", "Warning Beeper", "Units", "Exit"};
+  const char* options[4] = {"PowerPause Timeout", "Audible Beeper", "Units", "Exit"};
   int y = SETTINGS_TOP_Y + (settingsIndex * SETTINGS_OPTION_HEIGHT);
   uint16_t bg = COLOR_BG;
   uint16_t fg = COLOR_TEXT_PRIMARY;
@@ -352,35 +267,47 @@ void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, boo
 
 // Old drawSettingsRow removed - using drawPowerPauseSettingsRow for Settings screen
 
+// Runtime screen layout constants
+// Screen: 480 x 320 landscape
+// Top zone    (2/5) : y=0   .. THIRD_1_Y   (pressure)   128 px
+// Middle zone (2/5) : y=THIRD_1_Y .. THIRD_2_Y  (motor power)  128 px
+// Bottom zone (1/5) : y=THIRD_2_Y .. 320  (info bar)    64 px
+#define THIRD_1_Y  128
+#define THIRD_2_Y  256
+
 void drawRuntimeStatic(DisplayUnits units) {
   tft.fillScreen(COLOR_BG);
 
-  // Header at top
-  tft.setTextColor(COLOR_LABEL, COLOR_BG);
-  tft.setTextSize(2);
-  const char* headerText = (units == UNITS_IMPERIAL) ? "Set Target Pressure" : "Set Target Pressure";
-  int headerWidth = strlen(headerText) * 12;  // Approximate width
-  tft.setCursor((SCREEN_WIDTH - headerWidth) / 2, 10);
-  tft.print(headerText);
+  // Divider between top third and middle third
+  tft.drawFastHLine(0, THIRD_1_Y, SCREEN_WIDTH, TFT_DARKGREY);
 
-  // Draw horizontal line separating top 2/3 from bottom 1/3
-  int separatorY = (SCREEN_HEIGHT * 2) / 3;  // 213 pixels
-  tft.drawFastHLine(0, separatorY, SCREEN_WIDTH, TFT_DARKGREY);
-  
-  // Draw vertical line in bottom section (split job time and temp)
-  tft.drawFastVLine(SCREEN_WIDTH / 2, separatorY, SCREEN_HEIGHT - separatorY, TFT_DARKGREY);
+  // Divider between middle third and bottom third
+  tft.drawFastHLine(0, THIRD_2_Y, SCREEN_WIDTH, TFT_DARKGREY);
 
-  // Labels for bottom section
-  tft.setTextColor(COLOR_LABEL, COLOR_BG);
+  // ---- Top zone label: SYSTEM PRESSURE (centred just above divider) ----
+  tft.setTextFont(1);
   tft.setTextSize(2);
-  
-  // Job Time label (left side)
-  tft.setCursor(10, separatorY + 10);
-  tft.print("JOB TIME");
-  
-  // Temperature label (right side)
-  tft.setCursor(SCREEN_WIDTH / 2 + 10, separatorY + 10);
-  tft.print("TEMP");
+  tft.setTextColor(COLOR_LABEL, COLOR_BG);
+  const char* topLabel = "SYSTEM PRESSURE";
+  int topLabelW = strlen(topLabel) * 12;
+  tft.setCursor((SCREEN_WIDTH - topLabelW) / 2, THIRD_1_Y - 22);
+  tft.print(topLabel);
+
+  // ---- Middle zone label: TURBINE OUTPUT % (centred just above divider) ----
+  tft.setTextSize(2);
+  tft.setTextColor(COLOR_LABEL, COLOR_BG);
+  const char* midLabel = "TURBINE OUTPUT %";
+  int midLabelW = strlen(midLabel) * 12;
+  tft.setCursor((SCREEN_WIDTH - midLabelW) / 2, THIRD_2_Y - 22);
+  tft.print(midLabel);
+
+  // ---- Bottom zone: instruction line (top of zone) ----
+  tft.setTextSize(2);
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  const char* instrText = "TURN TO SET PRESSURE, PRESS FOR MENU";
+  int instrW = strlen(instrText) * 6;
+  tft.setCursor(5, THIRD_2_Y + 8);
+  tft.print(instrText);
 }
 
 void drawRuntimeTarget(float target, float current, DisplayUnits units, bool valid, bool forceRedraw) {
@@ -394,84 +321,57 @@ void drawRuntimeTarget(float target, float current, DisplayUnits units, bool val
   float displayTarget = target;
   float displayCurrent = current;
   if (units == UNITS_METRIC) {
-    // Custom scaling: 3 PSI = 200 mbar, 9 PSI = 625 mbar
-    // Linear mapping: mbar = 200 + (psi - 3) * (625 - 200) / (9 - 3)
-    // Simplified: mbar = 200 + (psi - 3) * 70.833
-    displayTarget = 200.0f + (target - 3.0f) * 70.833f;
+    displayTarget  = 200.0f + (target  - 3.0f) * 70.833f;
     displayCurrent = 200.0f + (current - 3.0f) * 70.833f;
-    
-    // Ensure minimum of 0 mbar (no negative values)
-    if (displayTarget < 0.0f) displayTarget = 0.0f;
+    if (displayTarget  < 0.0f) displayTarget  = 0.0f;
     if (displayCurrent < 0.0f) displayCurrent = 0.0f;
   }
 
-  // Determine color based on how close current is to target
-  uint16_t color = COLOR_TARGET_INACTIVE;
-  if (target < 0.1f) {
-    // Motor effectively off
-    color = COLOR_TARGET_INACTIVE;
-  } else if (!valid) {
-    color = TFT_DARKGREY;
-  } else {
-    float diff = fabsf(current - target);
-    if (diff <= 0.5f) {
-      color = COLOR_TARGET_ACTIVE;    // Green - within 0.5 PSI
-    } else {
-      color = COLOR_TARGET_OUTRANGE;  // Red - out of range
-    }
-  }
+  // Always green — pressure display in top third is always green per the new design
+  uint16_t color = TFT_GREEN;
+  if (!valid && target > 0.1f) color = TFT_DARKGREY;
 
-  if (!forceRedraw && fabsf(target - lastTarget) < 0.05f && 
-      fabsf(current - lastCurrent) < 0.05f && 
+  if (!forceRedraw && fabsf(target - lastTarget) < 0.05f &&
+      fabsf(current - lastCurrent) < 0.05f &&
       valid == lastValid && color == lastColor && units == lastUnits) {
     return;
   }
 
-  lastTarget = target;
+  lastTarget  = target;
   lastCurrent = current;
-  lastValid = valid;
-  lastColor = color;
-  lastUnits = units;
+  lastValid   = valid;
+  lastColor   = color;
+  lastUnits   = units;
 
-  int topSectionHeight = (SCREEN_HEIGHT * 2) / 3;
-  tft.fillRect(0, 30, SCREEN_WIDTH, topSectionHeight - 30, COLOR_BG);  // Don't clear header
+  // Clear the top third value area (leave the static label alone — it sits at bottom of zone)
+  // Label row starts at THIRD_1_Y-22; clear from y=0 to just above it
+  tft.fillRect(0, 0, SCREEN_WIDTH, THIRD_1_Y - 24, COLOR_BG);
 
-  // Display large target pressure using custom font
-  tft.setTextColor(color, COLOR_BG);
-  
-  char psiStr[10];
-  if (units == UNITS_IMPERIAL) {
-    snprintf(psiStr, sizeof(psiStr), "%4.1f", displayTarget);
+  // Build the string: "00.0 PSI" style
+  char valStr[12];
+  if (target >= MAX_PSI_THRESHOLD) {
+    // MAX mode: show label instead of a numeric value
+    snprintf(valStr, sizeof(valStr), "MAX");
+  } else if (units == UNITS_IMPERIAL) {
+    snprintf(valStr, sizeof(valStr), "%.1f PSI", displayTarget);
   } else {
-    // For mbar, show as integer (no decimal)
-    snprintf(psiStr, sizeof(psiStr), "%4.0f", displayTarget);
+    snprintf(valStr, sizeof(valStr), "%.0f mbar", displayTarget);
   }
-  
-  // Unit label first - positioned near bottom of top section
-  tft.setTextFont(1);  // Use built-in font
-  tft.setTextSize(3);
-  const char* unitLabel = (units == UNITS_IMPERIAL) ? "PSI" : "mbar";
-  int unitWidth = strlen(unitLabel) * 6 * 3;  // chars * 6 pixels * textSize 3
-  int unitY = topSectionHeight - 35;
-  tft.setCursor((SCREEN_WIDTH - unitWidth) / 2, unitY);
-  tft.print(unitLabel);
-  
-  // Use FreeSansBold24pt font - much larger and cleaner than built-in
+
+  // Draw using large free font, centred in the top zone
   tft.setFreeFont(&FreeSansBold24pt7b);
-  tft.setTextSize(4);  // Scale the 24pt font 4x for massive display
-  
-  // Get text dimensions using TFT_eSPI methods
-  int16_t w = tft.textWidth(psiStr);
+  tft.setTextSize(2);
+  tft.setTextColor(color, COLOR_BG);
+
+  int16_t w = tft.textWidth(valStr);
   int16_t h = tft.fontHeight();
-  
-  // Center horizontally and position so bottom of text touches top of unit label
-  int x = (SCREEN_WIDTH - w) / 2 - 15;  // Shift left 15px for better visual balance with unit label
-  int y = unitY - 10;  // Position baseline just above unit label (10px gap)
-  
+  int zoneH = THIRD_1_Y - 24;          // usable height above label
+  int x = (SCREEN_WIDTH - w) / 2;
+  int y = (zoneH + h) / 2 - 15;             // vertically centre baseline in zone
   tft.setCursor(x, y);
-  tft.print(psiStr);
-  
-  // Reset to built-in font so other text isn't affected
+  tft.print(valStr);
+
+  // Reset font
   tft.setTextFont(1);
   tft.setTextSize(1);
 }
@@ -483,26 +383,24 @@ void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw) {
   }
   lastJobTime = jobTimeSeconds;
 
-  int separatorY = (SCREEN_HEIGHT * 2) / 3;
-  int sectionHeight = SCREEN_HEIGHT - separatorY;
-  
-  // Clear job time area
-  tft.fillRect(2, separatorY + 35, (SCREEN_WIDTH / 2) - 4, sectionHeight - 37, COLOR_BG);
+  // Bottom zone — right half second line: "SYSTEM HOURS  HHH:MM"
+  // instruction text sits at THIRD_2_Y+8; data row sits 20px below that
+  const int infoLineY = THIRD_2_Y + 34;
+  tft.fillRect(SCREEN_WIDTH / 2, infoLineY, SCREEN_WIDTH / 2, 14, COLOR_BG);
 
-  tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
-  tft.setTextSize(4);
-  
-  // Format as HH:MM:SS
-  uint32_t hours = jobTimeSeconds / 3600;
+  uint32_t hours   = jobTimeSeconds / 3600;
   uint32_t minutes = (jobTimeSeconds % 3600) / 60;
-  uint32_t seconds = jobTimeSeconds % 60;
-  
-  char timeStr[12];
-  snprintf(timeStr, sizeof(timeStr), "%02lu:%02lu:%02lu", 
-           (unsigned long)hours, (unsigned long)minutes, (unsigned long)seconds);
-  
-  tft.setCursor(10, separatorY + 45);
-  tft.print(timeStr);
+
+  char buf[24];
+  snprintf(buf, sizeof(buf), "HOURS  %03lu:%02lu",
+           (unsigned long)hours, (unsigned long)minutes);
+
+  tft.setTextFont(1);
+  tft.setTextSize(2);
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setCursor(SCREEN_WIDTH / 2 + 4, infoLineY);
+  tft.print(buf);
+  tft.setTextSize(1);
 }
 
 void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw) {
@@ -511,85 +409,70 @@ void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw) {
   if (!forceRedraw && fabsf(tempC - lastTemp) < 0.5f && lastTemp != -999.0f && units == lastUnits) {
     return;
   }
-  lastTemp = tempC;
+  lastTemp  = tempC;
   lastUnits = units;
 
-  int separatorY = (SCREEN_HEIGHT * 2) / 3;
-  int sectionHeight = SCREEN_HEIGHT - separatorY;
-  
-  // Clear temperature area
-  tft.fillRect((SCREEN_WIDTH / 2) + 2, separatorY + 35, (SCREEN_WIDTH / 2) - 4, sectionHeight - 37, COLOR_BG);
+  // Bottom zone — left half second line: "SYSTEM TEMP  XXX F"
+  const int infoLineY = THIRD_2_Y + 34;
+  tft.fillRect(0, infoLineY, SCREEN_WIDTH / 2, 14, COLOR_BG);
 
-  tft.setTextColor(overTempActive ? COLOR_TEMP_WARNING : COLOR_TEMP, COLOR_BG);
-  tft.setTextSize(4);
-  tft.setCursor((SCREEN_WIDTH / 2) + 10, separatorY + 45);
-
+  char buf[32];
   if (overTempActive) {
-    tft.print("OVERHEAT");
+    snprintf(buf, sizeof(buf), "TEMP  OVERHEAT");
   } else if (tempC < -100.0f) {
-    tft.print("--");
+    snprintf(buf, sizeof(buf), "TEMP  ---");
   } else {
-    char tempStr[12];
     if (units == UNITS_IMPERIAL) {
       float tempF = (tempC * 9.0f / 5.0f) + 32.0f;
-      snprintf(tempStr, sizeof(tempStr), "%3.0f", tempF);
-      tft.print(tempStr);
-      tft.setTextSize(3);
-      tft.print("F");
+      snprintf(buf, sizeof(buf), "TEMP  %3.0f F", tempF);
     } else {
-      snprintf(tempStr, sizeof(tempStr), "%3.0f", tempC);
-      tft.print(tempStr);
-      tft.setTextSize(3);
-      tft.print("C");
+      snprintf(buf, sizeof(buf), "TEMP  %3.0f C", tempC);
     }
   }
-}
 
-void drawRuntimePauseCountdown(uint32_t secondsRemaining, bool forceRedraw) {
-  static uint32_t lastSeconds = 0xFFFFFFFF;
-  if (!forceRedraw && secondsRemaining == lastSeconds) {
-    return;
-  }
-  lastSeconds = secondsRemaining;
-
-  tft.fillRect(RUNTIME_RIGHT_X + 2, CELL_HEIGHT + 30, CELL_WIDTH - 4, CELL_HEIGHT - 32, COLOR_BG);
-  tft.setTextColor(TFT_CYAN, COLOR_BG);
-  tft.setTextSize(3);
-  tft.setCursor(RUNTIME_RIGHT_X + 20, CELL_HEIGHT + 50);
-
-  if (secondsRemaining == UINT32_MAX) {
-    tft.print("--");
-  } else {
-    char secStr[8];
-    snprintf(secStr, sizeof(secStr), "%lu", (unsigned long)secondsRemaining);
-    tft.print(secStr);
-  }
+  tft.setTextFont(1);
   tft.setTextSize(2);
-  tft.print("s");
-}
-
-void drawRuntimeFooter() {
-  tft.fillRect(0, RUNTIME_FOOTER_Y + 2, RUNTIME_FOOTER_WIDTH, CELL_HEIGHT - 4, COLOR_BG);
-  tft.setTextColor(TFT_WHITE, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(10, RUNTIME_FOOTER_Y + 35);
-  tft.print("PRESS TO PAUSE / MENU");
+  tft.setTextColor(overTempActive ? COLOR_TEMP_WARNING : COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setCursor(4, infoLineY);
+  tft.print(buf);
+  tft.setTextSize(1);
 }
 
 void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw) {
-  static uint16_t lastMotorSpeed = 0xFFFF;
-  if (!forceRedraw && motorSpeed == lastMotorSpeed) {
+  // motorSpeed is 0-1000 (matches motor_control scaling); convert to 0-100%
+  static uint16_t lastSpeed = 0xFFFF;
+  if (!forceRedraw && motorSpeed == lastSpeed) {
     return;
   }
-  lastMotorSpeed = motorSpeed;
+  lastSpeed = motorSpeed;
 
-  tft.fillRect(RUNTIME_RIGHT_X + 2, RUNTIME_FOOTER_Y + 30, CELL_WIDTH - 4, CELL_HEIGHT - 32, COLOR_BG);
-  tft.setTextColor(COLOR_RUNTIME, COLOR_BG);
-  tft.setTextSize(4);
-  tft.setCursor(RUNTIME_RIGHT_X + 20, RUNTIME_FOOTER_Y + 45);
-  tft.printf("%3u.%1u", motorSpeed / 10, motorSpeed % 10);
+  // Clear middle third value area (above the static label row)
+  tft.fillRect(0, THIRD_1_Y + 1, SCREEN_WIDTH, (THIRD_2_Y - 24) - THIRD_1_Y - 1, COLOR_BG);
+
+  // Clamp to 0-100 for display
+  uint16_t pct = (motorSpeed > 1000) ? 100 : (motorSpeed / 10);
+
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%3u%%", pct);
+
+  tft.setFreeFont(&FreeSansBold24pt7b);
   tft.setTextSize(2);
-  tft.print("%");
+  tft.setTextColor(TFT_CYAN, COLOR_BG);
+
+  int16_t w = tft.textWidth(buf);
+  int16_t h = tft.fontHeight();
+
+  int zoneTop = THIRD_1_Y + 1;
+  int zoneBot = THIRD_2_Y - 24;  // leave room for static label
+  int zoneH   = zoneBot - zoneTop;
+
+  int x = (SCREEN_WIDTH - w) / 2;
+  int y = zoneTop + (zoneH + h) / 2 - 15;  // vertically centre baseline
+  tft.setCursor(x, y);
+  tft.print(buf);
+
+  tft.setTextFont(1);
+  tft.setTextSize(1);
 }
 
 void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, bool forceRedraw) {
@@ -645,7 +528,7 @@ void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining
   tft.setTextColor(COLOR_WARNING, COLOR_OVERLAY_BG);
   tft.setTextSize(3);
   tft.setCursor(overlayX + 60, overlayY + 30);
-  tft.print("POWER PAUSE");
+  tft.print("PowerPause");
 
   if (idleState == IDLE_STATE_PID_RAMP) {
     tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_OVERLAY_BG);
@@ -757,108 +640,307 @@ void drawRuntimeFilterWarningOverlay() {
   tft.print("About Settings to clear.");
 }
 
-void drawSupportScreen() {
+// ---------------------------------------------------------------------------
+// Helper: draw a QR-code placeholder frame with centred URL text inside
+// Replace qrBitmap pointer + w/h args with a real pushImage call when ready.
+// ---------------------------------------------------------------------------
+static void drawQrPlaceholder(int cx, int cy, int size, const char* url) {
+  int x = cx - size / 2;
+  int y = cy - size / 2;
+  // Outer border
+  tft.drawRect(x,     y,     size,     size,     COLOR_TEXT_PRIMARY);
+  tft.drawRect(x + 1, y + 1, size - 2, size - 2, COLOR_TEXT_PRIMARY);
+  // Corner finder squares (top-left, top-right, bottom-left)
+  const int fp = 7 * (size / 100 > 0 ? size / 100 : 1) + 14;  // finder size ~21px for size=140
+  // top-left
+  tft.drawRect(x + 4,          y + 4,          fp, fp, COLOR_TEXT_PRIMARY);
+  tft.drawRect(x + 4 + 2,      y + 4 + 2,      fp - 4, fp - 4, COLOR_TEXT_PRIMARY);
+  tft.fillRect(x + 4 + 5,      y + 4 + 5,      fp - 10, fp - 10, COLOR_TEXT_PRIMARY);
+  // top-right
+  tft.drawRect(x + size - 4 - fp, y + 4,          fp, fp, COLOR_TEXT_PRIMARY);
+  tft.drawRect(x + size - 4 - fp + 2, y + 4 + 2,  fp - 4, fp - 4, COLOR_TEXT_PRIMARY);
+  tft.fillRect(x + size - 4 - fp + 5, y + 4 + 5,  fp - 10, fp - 10, COLOR_TEXT_PRIMARY);
+  // bottom-left
+  tft.drawRect(x + 4,          y + size - 4 - fp, fp, fp, COLOR_TEXT_PRIMARY);
+  tft.drawRect(x + 4 + 2,      y + size - 4 - fp + 2, fp - 4, fp - 4, COLOR_TEXT_PRIMARY);
+  tft.fillRect(x + 4 + 5,      y + size - 4 - fp + 5, fp - 10, fp - 10, COLOR_TEXT_PRIMARY);
+  // URL centred inside (small font)
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(1);
+  int textW = strlen(url) * 6;
+  tft.setCursor(cx - textW / 2, cy - 4);
+  tft.print(url);
+}
+
+void drawSupportMenuScreen(uint8_t menuIndex) {
   tft.fillScreen(COLOR_BG);
-  
+
   // Title
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
   tft.setTextSize(3);
-  tft.setCursor(160, 20);
+  int titleW = 7 * 18;  // "SUPPORT" 7 chars * ~18px
+  tft.setCursor((SCREEN_WIDTH - titleW) / 2, 14);
   tft.print("SUPPORT");
-  
-  // Support information box
-  const int boxX = 20;
-  const int boxY = 70;
-  const int boxW = SCREEN_WIDTH - 40;
-  const int boxH = 180;
-  
-  tft.drawRect(boxX, boxY, boxW, boxH, COLOR_TEXT_PRIMARY);
-  
-  // Placeholder text - user will fill this in later
+
+  // Divider
+  tft.drawFastHLine(0, 50, SCREEN_WIDTH, COLOR_TEXT_PRIMARY);
+
+  const char* options[4] = {"Frequently Asked Questions", "Technical Information", "Contact Us", "Return To Main Menu"};
+  // Spread 4 items evenly between y=70 and y=270
+  const int startY  = 80;
+  const int stepY   = 52;
+
+  for (uint8_t i = 0; i < 4; i++) {
+    int y = startY + i * stepY;
+    if (i == menuIndex) {
+      tft.fillRect(20, y - 8, SCREEN_WIDTH - 40, 32, COLOR_MENU_SELECT);
+      tft.setTextColor(TFT_BLACK, COLOR_MENU_SELECT);
+    } else {
+      tft.fillRect(20, y - 8, SCREEN_WIDTH - 40, 32, COLOR_BG);
+      tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+    }
+    tft.setTextSize(2);
+    int textW = strlen(options[i]) * 12;
+    tft.setCursor((SCREEN_WIDTH - textW) / 2, y);
+    tft.print(options[i]);
+  }
+}
+
+void drawSupportFaqScreen(void) {
+  tft.fillScreen(COLOR_BG);
+
+  // Title
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(2);
+  int titleW = 26 * 12;
+  tft.setCursor((SCREEN_WIDTH - titleW) / 2, 12);
+  tft.print("Frequently Asked Questions");
+
+  // QR code centred on screen
+  int qrX = (SCREEN_WIDTH - 200) / 2;
+  int qrY = 50;
+  tft.pushImage(qrX, qrY, 200, 200, qrFaq);
+
+  // Footer
+  tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(100, SCREEN_HEIGHT - 28);
+  tft.print("Press to return to menu");
+}
+
+void drawSupportTechScreen(void) {
+  tft.fillScreen(COLOR_BG);
+
+  // Title lines
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor((SCREEN_WIDTH - 12 * 12) / 2, 8);
+  tft.print("USERS MANUAL");
+  tft.setTextSize(2);
+  int t2W = 20 * 12;
+  tft.setCursor((SCREEN_WIDTH - t2W) / 2, 30);
+  tft.print("Technical information");
+
+  // QR code centred
+  int qrX = (SCREEN_WIDTH - 200) / 2;
+  int qrY = 55;
+  tft.pushImage(qrX, qrY, 200, 200, qrTech);
+
+  // Footer
+  tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(100, SCREEN_HEIGHT - 28);
+  tft.print("Press to return to menu");
+}
+
+void drawSupportContactScreen(void) {
+  tft.fillScreen(COLOR_BG);
+
+  // Title
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(3);
+  int titleW = 10 * 18;
+  tft.setCursor((SCREEN_WIDTH - titleW) / 2, 10);
+  tft.print("CONTACT US");
+  tft.drawFastHLine(0, 48, SCREEN_WIDTH, COLOR_TEXT_PRIMARY);
+
+  // Contact details
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(2);
+  const int lx = SCREEN_WIDTH / 2;  // centre-aligned
+  struct { const char* text; int y; } lines[] = {
+    { "Apollo Sprayers International, Inc.", 62 },
+    { "1030 Joshua Way",                    88 },
+    { "Vista, CA. 92081",                   114 },
+    { "Toll Free: (888) 900-HVLP (4857)",   140 },
+    { "E-Mail:  info@hvlp.com",             166 },
+    { "www.HVLP.com",                       192 },
+  };
+  for (auto& l : lines) {
+    int w = strlen(l.text) * 12;
+    tft.setCursor((SCREEN_WIDTH - w) / 2, l.y);
+    tft.print(l.text);
+  }
+
+  // Footer
+  tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(100, SCREEN_HEIGHT - 28);
+  tft.print("Press to return to menu");
+}
+
+void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, uint8_t selectedOption) {
+  tft.fillScreen(COLOR_BG);
+
+  // Title with clock icon
+  drawIconClock(28, 26, 16, COLOR_TEXT_PRIMARY);
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(3);
+  tft.setCursor(55, 14);
+  tft.print("TIMERS");
+
+  // Divider
+  tft.drawFastHLine(0, 52, SCREEN_WIDTH, COLOR_TEXT_SECONDARY);
+
+  // --- Job Timer block ---
+  const int block1Y = 65;
   tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
   tft.setTextSize(2);
-  tft.setCursor(boxX + 10, boxY + 20);
-  tft.print("Support information");
-  tft.setCursor(boxX + 10, boxY + 50);
-  tft.print("will be added here.");
-  tft.setCursor(boxX + 10, boxY + 90);
-  tft.print("Contact: TBD");
-  tft.setCursor(boxX + 10, boxY + 120);
-  tft.print("Email: TBD");
-  tft.setCursor(boxX + 10, boxY + 150);
-  tft.print("Web: TBD");
-  
-  // Footer
+  tft.setCursor(20, block1Y);
+  tft.print("JOB TIMER");
+
+  {
+    uint32_t jHours  = totalJobTimeTenths / 10;
+    uint8_t  jTenths = totalJobTimeTenths % 10;
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%02lu:%02u", (unsigned long)(jHours % 100), jTenths * 6);
+    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setTextColor(COLOR_RUNTIME, COLOR_BG);  // always green
+    tft.setCursor(100, block1Y + 70);
+    tft.print(buf);
+    tft.setFreeFont(nullptr);  // back to GLCD
+  }
+
+  // "PUSH TO RESET" label under job timer
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(100, block1Y + 57);
+  //tft.print("PUSH TO RESET");
+
+  // Divider between blocks
+  tft.drawFastHLine(0, 160, SCREEN_WIDTH, COLOR_TEXT_SECONDARY);
+
+  // --- Filter Maintenance Timer block ---
+  const int block2Y = 173;
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(20, block2Y);
+  tft.print("FILTER MAINTENANCE TIMER");
+
+  {
+    uint32_t fHours  = totalRuntimeTenths / 10;
+    uint8_t  fTenths = totalRuntimeTenths % 10;
+    // Cyan/blue while healthy, red when >= 10 hours (100 tenths)
+    uint16_t fColor  = (totalRuntimeTenths < 100) ? COLOR_CURRENT : COLOR_ERROR;
+    char buf[12];
+    snprintf(buf, sizeof(buf), "%02lu:%02u", (unsigned long)(fHours % 100), fTenths * 6);
+    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setTextColor(fColor, COLOR_BG);
+    tft.setCursor(100, block2Y + 70);
+    tft.print(buf);
+    tft.setFreeFont(nullptr);
+  }
+
+  // "PUSH TO RESET" label under filter timer
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(20, block2Y + 57);
+  //tft.print("PUSH TO RESET");
+
+  // Divider above footer
+  tft.drawFastHLine(0, 278, SCREEN_WIDTH, COLOR_TEXT_SECONDARY);
+
+  // --- Footer: three options ---
+  // Option 0: Reset Job Timer  |  Option 1: Reset Filter Timer  |  Option 2: Return
+  const int optionY = SCREEN_HEIGHT - 36;
+  const int opt0X   = 10;
+  const int opt1X   = 175;
+  const int opt2X   = 360;
+  const int opt0W   = 158;
+  const int opt1W   = 178;
+  const int opt2W   = 110;
+  const int optH    = 32;
+
+  auto drawOpt = [&](int ox, int ow, uint8_t idx, const char* label) {
+    if (selectedOption == idx) {
+      tft.fillRect(ox, optionY, ow, optH, COLOR_MENU_SELECT);
+      tft.setTextColor(TFT_BLACK, COLOR_MENU_SELECT);
+    } else {
+      tft.fillRect(ox, optionY, ow, optH, COLOR_BG);
+      tft.drawRect(ox, optionY, ow, optH, COLOR_TEXT_SECONDARY);
+      tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+    }
+    tft.setTextSize(2);
+    // Centre text horizontally in the box
+    int textW = strlen(label) * 12;  // ~12px per char at size 2
+    int textX = ox + (ow - textW) / 2;
+    tft.setCursor(textX, optionY + 8);
+    tft.print(label);
+  };
+
+  drawOpt(opt0X, opt0W, 0, "Reset Job");
+  drawOpt(opt1X, opt1W, 1, "Reset Filter");
+  drawOpt(opt2X, opt2W, 2, "Return");
+}
+
+void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion) {
+  tft.fillScreen(COLOR_BG);
+
+  // Title
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(3);
+  tft.setCursor(185, 14);
+  tft.print("ABOUT");
+
+  // Divider
+  tft.drawFastHLine(0, 50, SCREEN_WIDTH, COLOR_TEXT_SECONDARY);
+
+  // Product name (centred)
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(95, 68);
+  tft.print("PRECISION 6 PRO ELITE");
+
+  // Software version
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(95, 100);
+  tft.print("Software Version V");
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.print(firmwareVersion);
+
+  // System hours
+  {
+    uint32_t sHours  = totalSystemTimeTenths / 10;
+    uint8_t  sTenths = totalSystemTimeTenths % 10;
+    char buf[24];
+    snprintf(buf, sizeof(buf), "System Hours %02lu:%02u",
+             (unsigned long)sHours, sTenths * 6);
+    tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+    tft.setTextSize(2);
+    tft.setCursor(95, 132);
+    tft.print(buf);
+  }
+
+  // Assembled in USA
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(2);
+  tft.setCursor(130, 164);
+  tft.print("Assembled in USA");
+
+  // Footer — plain green text, same style as Support screen
   tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
   tft.setTextSize(2);
   tft.setCursor(100, SCREEN_HEIGHT - 40);
   tft.print("Press to return to menu");
-}
-
-void drawAboutScreen(uint32_t totalRuntimeTenths, const char* firmwareVersion, uint8_t selectedOption) {
-  tft.fillScreen(COLOR_BG);
-  
-  // Title
-  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.setTextSize(3);
-  tft.setCursor(180, 20);
-  tft.print("ABOUT");
-  
-  // Product name
-  tft.setTextSize(4);
-  tft.setCursor(80, 70);
-  tft.print("APOLLO HVLP");
-  
-  // Firmware version
-  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(120, 130);
-  tft.print("Firmware: ");
-  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.print(firmwareVersion);
-  
-  // Filter timer (formerly Total motor runtime)
-  uint32_t totalHours = totalRuntimeTenths / 10;
-  uint8_t tenths = totalRuntimeTenths % 10;
-  
-  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(50, 170);
-  tft.print("Time since last filter clean:");
-  
-  // Color code: green if < 10 hours, red if >= 10 hours
-  uint16_t timeColor = (totalRuntimeTenths < 100) ? COLOR_SUCCESS : COLOR_ERROR;
-  tft.setTextColor(timeColor, COLOR_BG);
-  tft.setTextSize(3);
-  tft.setCursor(140, 200);
-  char hoursStr[16];
-  snprintf(hoursStr, sizeof(hoursStr), "%lu.%u hrs", (unsigned long)totalHours, tenths);
-  tft.print(hoursStr);
-  
-  // Footer with two options
-  const int optionY = SCREEN_HEIGHT - 50;
-  const int option1X = 40;
-  const int option2X = 280;
-  
-  // Option 1: Reset Filter Timer
-  if (selectedOption == 0) {
-    tft.fillRect(option1X - 5, optionY - 5, 200, 35, COLOR_MENU_SELECT);
-    tft.setTextColor(TFT_BLACK, COLOR_MENU_SELECT);
-  } else {
-    tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  }
-  tft.setTextSize(2);
-  tft.setCursor(option1X, optionY);
-  tft.print("Reset Timer");
-  
-  // Option 2: Exit
-  if (selectedOption == 1) {
-    tft.fillRect(option2X - 5, optionY - 5, 100, 35, COLOR_MENU_SELECT);
-    tft.setTextColor(TFT_BLACK, COLOR_MENU_SELECT);
-  } else {
-    tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  }
-  tft.setTextSize(2);
-  tft.setCursor(option2X, optionY);
-  tft.print("Exit");
 }

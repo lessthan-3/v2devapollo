@@ -112,7 +112,6 @@ void saveJobTimer(void) {
 void loadSettings(void) {
     if (prefs.begin(NVS_NAMESPACE_APP, true)) {
         settingsIdleDev         = prefs.getFloat("idleDev",  IDLE_ENTRY_DEVIATION_PSI);
-        settingsStartPsi        = prefs.getFloat("startPsi", TARGET_PSI_DEFAULT);
         powerPauseSeconds       = prefs.getUShort("idleSec", IDLE_ENTRY_SECONDS);
         powerPauseBeeperEnabled = prefs.getBool("warnBeep",  true);
         displayUnits            = (DisplayUnits)prefs.getUChar("units", UNITS_IMPERIAL);
@@ -120,14 +119,15 @@ void loadSettings(void) {
     } else {
         prefs.end();
         settingsIdleDev         = IDLE_ENTRY_DEVIATION_PSI;
-        settingsStartPsi        = TARGET_PSI_DEFAULT;
         powerPauseSeconds       = IDLE_ENTRY_SECONDS;
         powerPauseBeeperEnabled = true;
     }
 
+    // Target pressure always boots at 0 — not persisted
+    settingsStartPsi = TARGET_PSI_DEFAULT;
+
     // Clamp to valid ranges
     settingsIdleDev   = constrain(settingsIdleDev,   IDLE_DEV_MIN, IDLE_DEV_MAX);
-    settingsStartPsi  = constrain(settingsStartPsi,  TARGET_PSI_MIN, TARGET_PSI_MAX);
     powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
 
     // Push to motor task
@@ -138,7 +138,6 @@ void loadSettings(void) {
 void saveSettings(void) {
     if (prefs.begin(NVS_NAMESPACE_APP, false)) {
         prefs.putFloat("idleDev",   settingsIdleDev);
-        prefs.putFloat("startPsi",  settingsStartPsi);
         prefs.putUShort("idleSec",  powerPauseSeconds);
         prefs.putBool("warnBeep",   powerPauseBeeperEnabled);
         prefs.putUChar("units",     (uint8_t)displayUnits);

@@ -123,17 +123,33 @@
 #define MOTOR_LOOP_INTERVAL_US      5000    // 5 ms loop (200 Hz)
 
 // Idle / Power Pause
-#define IDLE_ENTRY_SECONDS          20      // Seconds of stable pressure before idle
-#define IDLE_ENTRY_DEVIATION_PSI    0.12f   // Band around setpoint counted as stable
-#define IDLE_BAND_THRESHOLD_PSI     0.17f   // Band to increment power pause counter 
-#define IDLE_ENTRY_DECREASE         2000     // Counter decrease when outside band
+#define IDLE_ENTRY_SECONDS          20      // Seconds of stable motor speed before idle
+#define IDLE_ENTRY_DEVIATION_PSI    0.12f   // (legacy, kept for UI compatibility)
+#define IDLE_BAND_THRESHOLD_PSI     0.17f   // (legacy, kept for UI compatibility)
+#define IDLE_ENTRY_DECREASE         2000    // Counter decrease ticks when spike detected
 #define IDLE_TARGET_PSI             2.5f    // Pressure target while idle
 #define IDLE_STABLE_SECONDS         2       // Seconds at idle target before holding
 #define IDLE_STABLE_BAND_PSI        0.15f   // Stability band at idle target
 #define IDLE_EXIT_DROP_PSI          0.2f    // Pressure drop below idle target to exit
 #define IDLE_MIN_HOLD_SPEED         50      // Min motor speed in idle hold (0-1000)
 #define MAX_PRESSURE_DEVIATION_PSI  0.30f   // Deviation from peak used for MAX-mode power pause entry
-#define IDLE_LOOP_INCREMENT           3       // Ticks per loop within deviation band for idle entry
+#define IDLE_LOOP_INCREMENT         3       // Ticks per loop when stable motor speed detected
+
+// Motor-speed steady-state detection for power pause entry
+// The motor settles into a ~1% (10-unit on 0-1000 scale) oscillation at steady state.
+// We sample a rolling window and declare steady when max-min spread is within the threshold.
+#define IDLE_SPEED_STABLE_WINDOW    40      // Ring buffer depth (40 samples = 200 ms at 200 Hz)
+#define IDLE_SPEED_STABLE_SPREAD    14      // Max-min spread (0-1000) that counts as stable (~1.4%)
+// Spike threshold: linearly interpolated between 3 PSI and MAX_PSI_THRESHOLD
+//   At 3.0 PSI  → 10 units (1.0%)
+//   At 8.5 PSI  → 30 units (3.0%)
+#define IDLE_SPIKE_UNITS_AT_3PSI    10.0f   // Spike threshold at 3 PSI (units 0-1000)
+#define IDLE_SPIKE_UNITS_AT_MAX     30.0f   // Spike threshold at MAX_PSI_THRESHOLD
+
+// Idle hold phase (2.5 PSI) — uses same window/spread but fixed spike threshold
+// at the 3 PSI floor value since IDLE_TARGET_PSI is below 3 PSI.
+#define IDLE_HOLD_STABLE_SECONDS    1       // Seconds stable at idle speed before entering HOLD
+#define IDLE_HOLD_SPIKE_UNITS       10.0f   // Spike threshold during HOLD (matches 3 PSI entry floor)
 
 // ============================================================================
 // Temperature Sensor
@@ -150,7 +166,7 @@
 // ============================================================================
 #define TARGET_PSI_MIN          0.0f    // Minimum user-selectable pressure
 #define TARGET_PSI_MAX          9.0f    // Encoder upper bound (beyond MAX_PSI_THRESHOLD = MAX mode)
-#define TARGET_PSI_DEFAULT      6.0f
+#define TARGET_PSI_DEFAULT      0.0f
 #define TARGET_PSI_STEP         0.1f
 #define MAX_PSI_THRESHOLD       8.5f    // At or above this value: motor runs at 100% (MAX mode)
 

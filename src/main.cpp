@@ -115,10 +115,10 @@ void enterMenuScreen(void) {
 void enterRuntimeScreen(void) {
     currentScreen = SCREEN_RUNTIME;
 
-    // Always start at 0 PSI so motor ramps from rest
-    targetPsi = 0.0f;
+    // Restore the previously set target pressure so returning from the menu
+    // does not reset the setpoint back to zero.
     setTargetPressureSafe(targetPsi);
-    encoder.setCount(0);
+    encoder.setCount((int64_t)lroundf(targetPsi / TARGET_PSI_STEP));
     lastEncoderCount = encoder.getCount();
 
     // Seed the display timer from persisted flash value so it starts from

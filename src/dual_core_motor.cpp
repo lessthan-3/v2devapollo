@@ -14,7 +14,7 @@
 
 // Global shared data instance
 MotorSharedData motorShared = {
-    .targetPsi = 6.0f,
+    .targetPsi = TARGET_PSI_DEFAULT,
     .motorEnabled = false,
     .pidResetRequest = false,
     .pidGainsChanged = true,  // Start as true to load initial gains
@@ -94,6 +94,26 @@ void motorControlTask(void *parameter) {
     float maxPressureRecorded = 0.0f;  // tracks peak pressure for MAX-mode power pause
 
     const uint32_t idleStableLoops = (IDLE_STABLE_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
+    (void)idleStableLoops;  // replaced by idleHoldStableLoops; kept to avoid removing IDLE_STABLE_SECONDS ref
+
+    // --- Motor-speed steady-state detection ---
+    // Rolling ring buffer: track the last N motor speed samples to detect
+    // when the output has settled (max-min spread within IDLE_SPEED_STABLE_SPREAD).
+    uint16_t speedBuf[IDLE_SPEED_STABLE_WINDOW] = {};
+    uint8_t  speedBufIdx  = 0;
+    bool     speedBufFull = false;
+    bool     motorSteadyState = false;          // true once ring buffer declares stable
+    bool     steadyStateLogged = false;         // guard: only log once per steady-state entry
+
+    // --- Idle-phase (2.5 PSI ramp + hold) ring buffer ---
+    // Separate buffer so ramp settling detection doesn't share state with entry detection.
+    uint16_t idleSpeedBuf[IDLE_SPEED_STABLE_WINDOW] = {};
+    uint8_t  idleSpeedBufIdx  = 0;
+    bool     idleSpeedBufFull = false;
+    bool     idleMotorSteady  = false;          // true once idle speed has settled
+    bool     idleHoldMeanSet  = false;          // true once we have a baseline mean for exit detection
+    float    idleHoldMean     = 0.0f;           // rolling mean when HOLD state is entered
+    const uint32_t idleHoldStableLoops = (IDLE_HOLD_STABLE_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
     
     // Main motor control loop
     while (true) {
@@ -155,33 +175,18 @@ void motorControlTask(void *parameter) {
                 idleCounter = 0;
                 idleStableCounter = 0;
                 maxPressureRecorded = 0.0f;
+                motorSteadyState  = false;
+                steadyStateLogged = false;
+                speedBufFull      = false;
+                speedBufIdx       = 0;
+                idleMotorSteady  = false;
+                idleHoldMeanSet  = false;
+                idleSpeedBufFull = false;
+                idleSpeedBufIdx  = 0;
                 pidReset(&motorPid);
             }
             
-            bool inActiveBand = fabsf(smoothedPressure - target) <= idleEntryDeviation;
             bool isMaxMode = (target >= MAX_PSI_THRESHOLD);
-            if (idleState == IDLE_STATE_OFF && !isMaxMode) {
-                // Only count idle ticks when target PSI is above idle PSI (power pause is pointless below it)
-                if (inActiveBand && target > IDLE_TARGET_PSI) {
-                    if (idleCounter < idleEntryLoops) {
-                        idleCounter += IDLE_LOOP_INCREMENT;
-                    }
-                } else if (idleCounter > 0) {
-                    if (idleCounter > IDLE_ENTRY_DECREASE) {
-                        idleCounter -= IDLE_ENTRY_DECREASE;
-                    } else {
-                        idleCounter = 0;
-                    }
-                }
-
-                if (idleCounter >= idleEntryLoops && idleEntryLoops > 0) {
-                    idleState = IDLE_STATE_PID_RAMP;
-                    idleCounter = 0;
-                    idleStableCounter = 0;
-                    idleHoldSpeed = 0;
-                    pidReset(&motorPid);
-                }
-            }
 
             float pidOut = 0.0f;
 
@@ -204,21 +209,54 @@ void motorControlTask(void *parameter) {
                 setMotorSpeed(speed);
                 lastSpeed = speed;
 
-                if (fabsf(smoothedPressure - IDLE_TARGET_PSI) <= IDLE_STABLE_BAND_PSI) {
-                    if (idleStableCounter < idleStableLoops) {
+                // Push into idle-phase ring buffer
+                idleSpeedBuf[idleSpeedBufIdx] = speed;
+                idleSpeedBufIdx = (idleSpeedBufIdx + 1) % IDLE_SPEED_STABLE_WINDOW;
+                if (idleSpeedBufIdx == 0) idleSpeedBufFull = true;
+
+                // Evaluate spread once buffer is full
+                bool idleNowSteady = false;
+                float idleBufMean  = 0.0f;
+                if (idleSpeedBufFull) {
+                    uint16_t minS = idleSpeedBuf[0], maxS = idleSpeedBuf[0];
+                    uint32_t sum  = 0;
+                    for (uint8_t i = 0; i < IDLE_SPEED_STABLE_WINDOW; i++) {
+                        if (idleSpeedBuf[i] < minS) minS = idleSpeedBuf[i];
+                        if (idleSpeedBuf[i] > maxS) maxS = idleSpeedBuf[i];
+                        sum += idleSpeedBuf[i];
+                    }
+                    idleBufMean   = (float)sum / IDLE_SPEED_STABLE_WINDOW;
+                    idleNowSteady = ((maxS - minS) <= IDLE_SPEED_STABLE_SPREAD);
+                }
+
+                if (idleNowSteady && !idleMotorSteady) {
+                    idleMotorSteady = true;
+                    Serial.printf("[PowerPause] Idle speed stable: speed=%u (mean=%.1f), entering HOLD\n",
+                                  speed, idleBufMean);
+                } else if (!idleNowSteady) {
+                    idleMotorSteady = false;
+                }
+
+                if (idleMotorSteady && idleNowSteady) {
+                    if (idleStableCounter < idleHoldStableLoops) {
                         idleStableCounter++;
                     }
                 } else {
                     idleStableCounter = 0;
                 }
 
-                if (idleStableCounter >= idleStableLoops && idleStableLoops > 0) {
+                if (idleStableCounter >= idleHoldStableLoops && idleHoldStableLoops > 0) {
                     idleHoldSpeed = speed;
                     if (idleHoldSpeed < IDLE_MIN_HOLD_SPEED) {
                         idleHoldSpeed = IDLE_MIN_HOLD_SPEED;
                     }
+                    // Seed the hold-phase buffer with the current mean as baseline
+                    idleHoldMean   = idleBufMean;
+                    idleHoldMeanSet = true;
                     idleState = IDLE_STATE_HOLD;
                     pidReset(&motorPid);
+                    Serial.printf("[PowerPause] HOLD entered: holdSpeed=%u, mean=%.1f\n",
+                                  idleHoldSpeed, idleHoldMean);
                 }
             } else if (idleState == IDLE_STATE_HOLD) {
                 setMotorSpeed(idleHoldSpeed);
@@ -226,10 +264,50 @@ void motorControlTask(void *parameter) {
                 pidOut = (float)idleHoldSpeed;
                 lastSpeed = speed;
 
-                if (smoothedPressure < (IDLE_TARGET_PSI - IDLE_EXIT_DROP_PSI)) {
+                // During HOLD the motor runs at a fixed speed, so the ring buffer
+                // will always be flat — use it purely for exit spike detection.
+                // We compare the live speed (which remains idleHoldSpeed unless a
+                // load event causes the PID to be re-engaged externally) against the
+                // baseline mean captured on HOLD entry.  In practice, a pressure drop
+                // caused by user demand will cause the PID ramp to fire once we exit,
+                // so we detect exit by checking pressure below the idle floor OR by
+                // a direct speed spike if the user forces a change.
+                //
+                // For now, use pressure as the primary exit signal (unchanged behaviour)
+                // and additionally exit if a speed spike beyond IDLE_HOLD_SPIKE_UNITS
+                // is detected, matching the entry algorithm symmetry.
+                //
+                // Speed spike check: compare live pressure-implied deviation using the
+                // idle hold mean from the ramp phase.
+                bool holdExitBySpike = false;
+                if (idleHoldMeanSet) {
+                    float holdDeviation = fabsf((float)speed - idleHoldMean);
+                    if (holdDeviation > IDLE_HOLD_SPIKE_UNITS) {
+                        holdExitBySpike = true;
+                        Serial.printf("[PowerPause] HOLD exit by speed spike: speed=%u, mean=%.1f, dev=%.1f\n",
+                                      speed, idleHoldMean, holdDeviation);
+                    }
+                }
+
+                bool holdExitByPressure = (smoothedPressure < (IDLE_TARGET_PSI - IDLE_EXIT_DROP_PSI));
+                if (holdExitByPressure) {
+                    Serial.printf("[PowerPause] HOLD exit by pressure drop: psi=%.2f\n", smoothedPressure);
+                }
+
+                if (holdExitBySpike || holdExitByPressure) {
                     idleState = IDLE_STATE_OFF;
                     idleCounter = 0;
                     idleStableCounter = 0;
+                    idleMotorSteady  = false;
+                    idleHoldMeanSet  = false;
+                    idleSpeedBufFull = false;
+                    idleSpeedBufIdx  = 0;
+                    // Also clear the entry buffer so steady-state re-detection
+                    // starts fresh with real post-resume data.
+                    motorSteadyState  = false;
+                    steadyStateLogged = false;
+                    speedBufFull      = false;
+                    speedBufIdx       = 0;
                     pidReset(&motorPid);
                 }
             } else {
@@ -285,6 +363,110 @@ void motorControlTask(void *parameter) {
                     speed = (uint16_t)adjustedSpeed;
                     setMotorSpeed(speed);
                     lastSpeed = speed;
+
+                    // -----------------------------------------------------------------
+                    // Motor-speed steady-state detection for power pause entry.
+                    //
+                    // Push the freshly-computed speed into a ring buffer and examine
+                    // the max-min spread across the window.  When the spread is within
+                    // IDLE_SPEED_STABLE_SPREAD the PID output has settled and we start
+                    // counting toward power-pause entry.
+                    //
+                    // Spike detection uses the rolling mean of the buffer (not a stale
+                    // one-time snapshot) so it tracks any gradual shift in the setpoint
+                    // level without producing false positives.
+                    //
+                    // Spike threshold is linearly interpolated from target PSI:
+                    //   3.0 PSI  →  IDLE_SPIKE_UNITS_AT_3PSI  (1 %)
+                    //   8.5 PSI  →  IDLE_SPIKE_UNITS_AT_MAX   (3 %)
+                    // -----------------------------------------------------------------
+                    if (target > IDLE_TARGET_PSI) {
+                        // --- Push into ring buffer ---
+                        speedBuf[speedBufIdx] = speed;
+                        speedBufIdx = (speedBufIdx + 1) % IDLE_SPEED_STABLE_WINDOW;
+                        if (speedBufIdx == 0) speedBufFull = true;
+
+                        // --- Evaluate buffer once it is full ---
+                        bool nowSteady = false;
+                        float bufMean  = 0.0f;
+                        if (speedBufFull) {
+                            uint16_t minS = speedBuf[0], maxS = speedBuf[0];
+                            uint32_t sum  = 0;
+                            for (uint8_t i = 0; i < IDLE_SPEED_STABLE_WINDOW; i++) {
+                                if (speedBuf[i] < minS) minS = speedBuf[i];
+                                if (speedBuf[i] > maxS) maxS = speedBuf[i];
+                                sum += speedBuf[i];
+                            }
+                            bufMean   = (float)sum / IDLE_SPEED_STABLE_WINDOW;
+                            nowSteady = ((maxS - minS) <= IDLE_SPEED_STABLE_SPREAD);
+                        }
+
+                        // --- Steady-state transition logging ---
+                        if (nowSteady && !motorSteadyState) {
+                            motorSteadyState = true;
+                            if (!steadyStateLogged) {
+                                Serial.printf("[PowerPause] Steady state detected: speed=%u (mean=%.1f), target=%.1f PSI\n",
+                                              speed, bufMean, target);
+                                steadyStateLogged = true;
+                            }
+                        } else if (!nowSteady) {
+                            if (motorSteadyState) {
+                                Serial.printf("[PowerPause] Steady state lost: speed=%u, target=%.1f PSI\n",
+                                              speed, target);
+                            }
+                            motorSteadyState  = false;
+                            steadyStateLogged = false;
+                        }
+
+                        // --- PSI-scaled spike threshold ---
+                        float spikeThreshold;
+                        {
+                            float ct = target;
+                            if (ct < 3.0f)               ct = 3.0f;
+                            if (ct > MAX_PSI_THRESHOLD)  ct = MAX_PSI_THRESHOLD;
+                            float t = (ct - 3.0f) / (MAX_PSI_THRESHOLD - 3.0f);
+                            spikeThreshold = IDLE_SPIKE_UNITS_AT_3PSI +
+                                             t * (IDLE_SPIKE_UNITS_AT_MAX - IDLE_SPIKE_UNITS_AT_3PSI);
+                        }
+
+                        // --- Idle counter update ---
+                        if (motorSteadyState) {
+                            // Compare current speed against the rolling mean
+                            float deviation = fabsf((float)speed - bufMean);
+                            if (deviation > spikeThreshold) {
+                                // Spike detected — penalise counter
+                                if (idleCounter > IDLE_ENTRY_DECREASE) {
+                                    idleCounter -= IDLE_ENTRY_DECREASE;
+                                } else {
+                                    idleCounter = 0;
+                                }
+                            } else {
+                                // Settled — count toward power pause
+                                if (idleCounter < idleEntryLoops) {
+                                    idleCounter += IDLE_LOOP_INCREMENT;
+                                }
+                            }
+                        } else {
+                            // Not steady — drain the counter
+                            if (idleCounter > IDLE_ENTRY_DECREASE) {
+                                idleCounter -= IDLE_ENTRY_DECREASE;
+                            } else {
+                                idleCounter = 0;
+                            }
+                        }
+
+                        if (idleCounter >= idleEntryLoops && idleEntryLoops > 0) {
+                            idleState = IDLE_STATE_PID_RAMP;
+                            idleCounter = 0;
+                            idleStableCounter = 0;
+                            idleHoldSpeed = 0;
+                            motorSteadyState  = false;
+                            steadyStateLogged = false;
+                            speedBufFull      = false;
+                            speedBufIdx       = 0;
+                            pidReset(&motorPid);
+                        }
+                    }
                 }
             }
 
@@ -308,12 +490,16 @@ void motorControlTask(void *parameter) {
             idleCounter = 0;
             idleStableCounter = 0;
             maxPressureRecorded = 0.0f;
-            
+            motorSteadyState  = false;
+            steadyStateLogged = false;
+            speedBufFull      = false;
+            speedBufIdx       = 0;
+            idleMotorSteady  = false;
+            idleHoldMeanSet  = false;
+            idleSpeedBufFull = false;
+            idleSpeedBufIdx  = 0;
+
             portENTER_CRITICAL(&motorShared.mutex);
-            motorShared.motorSpeed = 0;
-            motorShared.pressureValid = valid;
-            motorShared.idleSecondsRemaining = UINT32_MAX;
-            motorShared.idleState = IDLE_STATE_OFF;
             if (valid) {
                 motorShared.currentPsi = reading.pressurePsi;
                 motorShared.rawPressure = reading.rawValue;
@@ -330,7 +516,15 @@ void motorControlTask(void *parameter) {
             idleState = IDLE_STATE_OFF;
             idleCounter = 0;
             idleStableCounter = 0;
-            
+            motorSteadyState  = false;
+            steadyStateLogged = false;
+            speedBufFull      = false;
+            speedBufIdx       = 0;
+            idleMotorSteady  = false;
+            idleHoldMeanSet  = false;
+            idleSpeedBufFull = false;
+            idleSpeedBufIdx  = 0;
+
             portENTER_CRITICAL(&motorShared.mutex);
             motorShared.motorSpeed = 0;
             motorShared.pressureValid = false;

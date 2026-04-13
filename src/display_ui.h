@@ -16,7 +16,7 @@ void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, 
 void drawPowerPauseSettingsFooter(const char* message, uint16_t color);
 void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, DisplayUnits units, bool selected, bool editing);
 void drawRuntimeStatic(DisplayUnits units);
-void drawRuntimeTarget(float target, float current, DisplayUnits units, bool valid, bool forceRedraw = false);
+void drawRuntimeTarget(float target, float current, DisplayUnits units, bool valid, bool forceRedraw = false, uint16_t motorSpeed = 0);
 void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw = false);
 void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw = false);
 void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw = false);

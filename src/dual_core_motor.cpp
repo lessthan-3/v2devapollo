@@ -104,6 +104,7 @@ void motorControlTask(void *parameter) {
     bool     speedBufFull = false;
     bool     motorSteadyState = false;          // true once ring buffer declares stable
     bool     steadyStateLogged = false;         // guard: only log once per steady-state entry
+    bool     pidSaturatedLogged = false;        // guard: only log once per PID-saturated entry
 
     // --- Idle-phase (2.5 PSI ramp + hold) ring buffer ---
     // Separate buffer so ramp settling detection doesn't share state with entry detection.
@@ -347,7 +348,10 @@ void motorControlTask(void *parameter) {
                     }
                 } else {
                     // Normal PID mode
-                    maxPressureRecorded = 0.0f;  // reset when leaving MAX mode
+                    // Note: maxPressureRecorded is managed by the inner saturated-speed
+                    // path below; do NOT reset it here so the peak accumulates correctly
+                    // when the PID is saturated at 100%.  It is zeroed out by the inner
+                    // logic whenever the motor is NOT in the saturated path.
                     motorPid.setpoint = target;
                     pidOut = pidCalculate(&motorPid, smoothedPressure);
                     int adjustedSpeed = (int)lastSpeed + (int)lroundf(pidOut);
@@ -414,8 +418,9 @@ void motorControlTask(void *parameter) {
                                 Serial.printf("[PowerPause] Steady state lost: speed=%u, target=%.1f PSI\n",
                                               speed, target);
                             }
-                            motorSteadyState  = false;
-                            steadyStateLogged = false;
+                            motorSteadyState     = false;
+                            steadyStateLogged    = false;
+                            pidSaturatedLogged   = false;
                         }
 
                         // --- PSI-scaled spike threshold ---
@@ -431,23 +436,58 @@ void motorControlTask(void *parameter) {
 
                         // --- Idle counter update ---
                         if (motorSteadyState) {
-                            // Compare current speed against the rolling mean
-                            float deviation = fabsf((float)speed - bufMean);
-                            if (deviation > spikeThreshold) {
-                                // Spike detected — penalise counter
-                                if (idleCounter > IDLE_ENTRY_DECREASE) {
+                            // Edge case: PID saturated at full power (mean ≈ 1000).
+                            // The motor cannot reach the setpoint so speed is "stable"
+                            // at 100% without the system actually being settled.
+                            // Switch to the MAX-mode pressure-stability algorithm:
+                            // track peak pressure and count only while pressure stays
+                            // within MAX_PRESSURE_DEVIATION_PSI of that peak.
+                            bool pidSaturated = (bufMean >= 990.0f);
+
+                            if (pidSaturated) {
+                                // --- Saturated-speed path: mirror MAX-mode pressure logic ---
+                                if (!pidSaturatedLogged) {
+                                    Serial.printf("[PowerPause] PID saturated at 100%% speed — using pressure-stability algorithm (peak=%.2f PSI)\n",
+                                                  maxPressureRecorded);
+                                    pidSaturatedLogged = true;
+                                }
+
+                                if (smoothedPressure > maxPressureRecorded) {
+                                    maxPressureRecorded = smoothedPressure;
+                                }
+
+                                if (smoothedPressure >= maxPressureRecorded - MAX_PRESSURE_DEVIATION_PSI) {
+                                    if (idleCounter < idleEntryLoops) {
+                                        idleCounter += IDLE_LOOP_INCREMENT;
+                                    }
+                                } else if (idleCounter >= IDLE_ENTRY_DECREASE) {
                                     idleCounter -= IDLE_ENTRY_DECREASE;
                                 } else {
                                     idleCounter = 0;
+                                    maxPressureRecorded = smoothedPressure;
                                 }
                             } else {
-                                // Settled — count toward power pause
-                                if (idleCounter < idleEntryLoops) {
-                                    idleCounter += IDLE_LOOP_INCREMENT;
+                                // Normal path: compare current speed against the rolling mean
+                                maxPressureRecorded  = 0.0f;
+                                pidSaturatedLogged   = false;
+                                float deviation = fabsf((float)speed - bufMean);
+                                if (deviation > spikeThreshold) {
+                                    // Spike detected — penalise counter
+                                    if (idleCounter > IDLE_ENTRY_DECREASE) {
+                                        idleCounter -= IDLE_ENTRY_DECREASE;
+                                    } else {
+                                        idleCounter = 0;
+                                    }
+                                } else {
+                                    // Settled — count toward power pause
+                                    if (idleCounter < idleEntryLoops) {
+                                        idleCounter += IDLE_LOOP_INCREMENT;
+                                    }
                                 }
                             }
                         } else {
                             // Not steady — drain the counter
+                            maxPressureRecorded = 0.0f;
                             if (idleCounter > IDLE_ENTRY_DECREASE) {
                                 idleCounter -= IDLE_ENTRY_DECREASE;
                             } else {
@@ -460,10 +500,11 @@ void motorControlTask(void *parameter) {
                             idleCounter = 0;
                             idleStableCounter = 0;
                             idleHoldSpeed = 0;
-                            motorSteadyState  = false;
-                            steadyStateLogged = false;
-                            speedBufFull      = false;
-                            speedBufIdx       = 0;
+                            motorSteadyState   = false;
+                            steadyStateLogged  = false;
+                            pidSaturatedLogged = false;
+                            speedBufFull       = false;
+                            speedBufIdx        = 0;
                             pidReset(&motorPid);
                         }
                     }

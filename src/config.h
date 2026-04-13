@@ -132,7 +132,7 @@
 #define IDLE_STABLE_BAND_PSI        0.15f   // Stability band at idle target
 #define IDLE_EXIT_DROP_PSI          0.2f    // Pressure drop below idle target to exit
 #define IDLE_MIN_HOLD_SPEED         50      // Min motor speed in idle hold (0-1000)
-#define MAX_PRESSURE_DEVIATION_PSI  0.30f   // Deviation from peak used for MAX-mode power pause entry
+#define MAX_PRESSURE_DEVIATION_PSI  0.35f   // Deviation from peak used for MAX-mode power pause entry
 #define IDLE_LOOP_INCREMENT         3       // Ticks per loop when stable motor speed detected
 
 // Motor-speed steady-state detection for power pause entry
@@ -156,26 +156,32 @@
 // ============================================================================
 // Conversion formula (applied in tempSensorReadC()):
 //   tempC = -1.75 * adcValue + 207.0
-#define TEMP_OVERHEAT_SETPOINT      115.0f  // Shutdown above this (°C)
-//#define TEMP_OVERHEAT_SETPOINT      400.0f  // Shutdown above this (°C) - set very high for initial testing without temp sensor
-
-#define TEMP_OVERHEAT_CLEAR         100.0f  // Re-enable motor below this (°C)
+//
+// Two-level temperature protection:
+//   WARNING  : >= TEMP_WARN_SETPOINT  (230 F / 110.0 C)  — motor continues, overlay shown
+//   SHUTDOWN : >= TEMP_SHUTDOWN_SETPOINT (266 F / 130.0 C) — motor stops, restart required
+#define TEMP_WARN_SETPOINT          110.0f  // Filter-check warning threshold (°C) = 230 °F
+#define TEMP_SHUTDOWN_SETPOINT      130.0f  // Hard-shutdown threshold (°C) = 266 °F
+//#define TEMP_WARN_SETPOINT          400.0f  // Set very high to disable during testing
+//#define TEMP_SHUTDOWN_SETPOINT      410.0f  // Set very high to disable during testing
 
 // ============================================================================
 // Target Pressure (user-facing)
 // ============================================================================
 #define TARGET_PSI_MIN          0.0f    // Minimum user-selectable pressure
-#define TARGET_PSI_MAX          9.0f    // Encoder upper bound (beyond MAX_PSI_THRESHOLD = MAX mode)
+#define TARGET_PSI_MAX          11.0f    // Encoder upper bound (beyond MAX_PSI_THRESHOLD = MAX mode)
 #define TARGET_PSI_DEFAULT      0.0f
 #define TARGET_PSI_STEP         0.1f
-#define MAX_PSI_THRESHOLD       8.5f    // At or above this value: motor runs at 100% (MAX mode)
+#define MAX_PSI_THRESHOLD       12.0f    // At or above this value: motor runs at 100% (MAX mode)
 
 // ============================================================================
 // Power Pause Settings
+// 100% = POWER_PAUSE_PCT_BASE seconds; range 50%–150% → 30s–90s
 // ============================================================================
-#define POWER_PAUSE_SEC_MIN     20
-#define POWER_PAUSE_SEC_MAX     600
-#define POWER_PAUSE_SEC_STEP    1
+#define POWER_PAUSE_PCT_BASE    60      // Seconds corresponding to 100%
+#define POWER_PAUSE_SEC_MIN     30      // 50%
+#define POWER_PAUSE_SEC_MAX     90      // 150%
+#define POWER_PAUSE_SEC_STEP    1       // Encoder step (1 s ≈ 1.67%)
 #define POWER_PAUSE_WARN_SEC    10      // Fixed warning countdown (seconds)
 
 // Idle entry deviation tuning bounds

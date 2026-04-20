@@ -21,6 +21,7 @@ extern float    settingsStartPsi;
 extern uint16_t powerPauseSeconds;
 extern bool     powerPauseBeeperEnabled;
 extern DisplayUnits displayUnits;
+extern bool     lightThemeEnabled;
 
 /**
  * @brief Load the filter hour meter from NVS into totalRuntimeTenths.

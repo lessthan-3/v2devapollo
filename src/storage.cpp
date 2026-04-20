@@ -115,6 +115,7 @@ void loadSettings(void) {
         powerPauseSeconds       = prefs.getUShort("idleSec", IDLE_ENTRY_SECONDS);
         powerPauseBeeperEnabled = prefs.getBool("warnBeep",  true);
         displayUnits            = (DisplayUnits)prefs.getUChar("units", UNITS_IMPERIAL);
+        lightThemeEnabled       = prefs.getBool("lightTheme",  false);
         prefs.end();
     } else {
         prefs.end();
@@ -141,6 +142,7 @@ void saveSettings(void) {
         prefs.putUShort("idleSec",  powerPauseSeconds);
         prefs.putBool("warnBeep",   powerPauseBeeperEnabled);
         prefs.putUChar("units",     (uint8_t)displayUnits);
+        prefs.putBool("lightTheme",  lightThemeEnabled);
         prefs.end();
     } else {
         prefs.end();

@@ -176,12 +176,12 @@
 
 // ============================================================================
 // Power Pause Settings
-// 100% = POWER_PAUSE_PCT_BASE seconds; range 50%–150% → 30s–90s
+// 100% = POWER_PAUSE_PCT_BASE seconds; three fixed steps: 100%, 125%, 150%
 // ============================================================================
 #define POWER_PAUSE_PCT_BASE    60      // Seconds corresponding to 100%
-#define POWER_PAUSE_SEC_MIN     30      // 50%
-#define POWER_PAUSE_SEC_MAX     90      // 150%
-#define POWER_PAUSE_SEC_STEP    1       // Encoder step (1 s ≈ 1.67%)
+#define POWER_PAUSE_SEC_MIN     60      // 100% (minimum / default)
+#define POWER_PAUSE_SEC_MAX     90      // 150% (maximum)
+#define POWER_PAUSE_SEC_STEP    15      // Encoder step: 15 s = 25% per detent
 #define POWER_PAUSE_WARN_SEC    10      // Fixed warning countdown (seconds)
 
 // Idle entry deviation tuning bounds
@@ -215,7 +215,7 @@
 #define MENU_OPTION_COUNT       5
 #define MENU_OPTION_HEIGHT      40
 #define MENU_TOP_Y              90
-#define SETTINGS_OPTION_COUNT   4
+#define SETTINGS_OPTION_COUNT   5
 #define SETTINGS_OPTION_HEIGHT  40
 #define SETTINGS_TOP_Y          85
 #define SUPPORT_OPTION_COUNT    4
@@ -257,5 +257,11 @@
 #define DEBUG_SERIAL_OUTPUT     1   // 1 = enable serial debug in loop()
 // Add -DTRIAC_DEBUG_SERIAL to build_flags to enable triac ISR diagnostics
 // Add -DSIMULATE_AC_60HZ    to build_flags to simulate zero crossings
+
+// Set to 1 to enable the overlay preview carousel on the main menu screen.
+// Cycles through every warning overlay on a 3-second rotation so the UI can
+// be verified without triggering real fault conditions.
+// Set to 0 (or comment out) before production builds.
+#define DEBUG_OVERLAY_PREVIEW   0
 
 #endif // CONFIG_H

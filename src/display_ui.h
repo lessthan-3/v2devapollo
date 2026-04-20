@@ -31,4 +31,9 @@ void drawSupportContactScreen(void);
 void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, uint8_t selectedOption);
 void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion);
 
+// Debug overlay preview carousel — compiled out unless DEBUG_OVERLAY_PREVIEW != 0
+#if DEBUG_OVERLAY_PREVIEW
+void drawDebugOverlayPreview(uint8_t stage);
+#endif
+
 #endif

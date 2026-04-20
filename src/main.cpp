@@ -46,6 +46,7 @@ float       settingsStartPsi        = TARGET_PSI_DEFAULT;
 uint16_t    powerPauseSeconds       = IDLE_ENTRY_SECONDS;
 bool        powerPauseBeeperEnabled = true;
 DisplayUnits displayUnits           = UNITS_IMPERIAL;
+bool        lightThemeEnabled       = false;
 
 // Runtime target pressure
 float       targetPsi               = TARGET_PSI_DEFAULT;
@@ -399,12 +400,19 @@ void loop() {
         } else if (currentScreen == SCREEN_SETTINGS) {
             if (settingsEditing) {
                 if (settingsIndex == 0) {
-                    int32_t next = (int32_t)powerPauseSeconds + (int32_t)delta * POWER_PAUSE_SEC_STEP;
-                    powerPauseSeconds = (uint16_t)constrain(next, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
-                    settingsDirty = true;
-                    syncPowerPauseSettings(false);
-                    drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled,
-                                              powerPauseWarnSeconds, displayUnits, true, true);
+                    static int32_t pauseAcc = 0;
+                    pauseAcc += (int32_t)delta;
+                    int32_t steps = 0;
+                    while (pauseAcc >= 2)  { steps++;  pauseAcc -= 2; }
+                    while (pauseAcc <= -2) { steps--;  pauseAcc += 2; }
+                    if (steps != 0) {
+                        int32_t next = (int32_t)powerPauseSeconds + steps * POWER_PAUSE_SEC_STEP;
+                        powerPauseSeconds = (uint16_t)constrain(next, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
+                        settingsDirty = true;
+                        syncPowerPauseSettings(false);
+                        drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled,
+                                                  powerPauseWarnSeconds, displayUnits, true, true);
+                    }
                 } else if (settingsIndex == 1) {
                     static int32_t beeperAcc = 0;
                     beeperAcc += (int32_t)delta;
@@ -424,6 +432,17 @@ void loop() {
                         drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled,
                                                   powerPauseWarnSeconds, displayUnits, true, true);
                         unitsAcc = 0;
+                    }
+                } else if (settingsIndex == 3) {
+                    static int32_t themeAcc = 0;
+                    themeAcc += (int32_t)delta;
+                    if (themeAcc >= 2 || themeAcc <= -2) {
+                        lightThemeEnabled = !lightThemeEnabled;
+                        settingsDirty = true;
+                        // Force full screen redraw — background colour has changed
+                        drawPowerPauseSettingsScreen(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled,
+                                                     powerPauseWarnSeconds, displayUnits, true, true);
+                        themeAcc = 0;
                     }
                 }
             } else {
@@ -522,12 +541,12 @@ void loop() {
                                               powerPauseWarnSeconds, displayUnits, true, false);
                     drawPowerPauseSettingsFooter("Press to edit / select", COLOR_SUCCESS);
                 } else {
-                    if (settingsIndex <= 2) {
+                    if (settingsIndex <= 3) {
                         settingsEditing = true;
                         drawPowerPauseSettingsRow(settingsIndex, powerPauseSeconds, powerPauseBeeperEnabled,
                                                   powerPauseWarnSeconds, displayUnits, true, true);
                         drawPowerPauseSettingsFooter("Rotate to adjust, press to exit", COLOR_MENU_EDIT);
-                    } else {  // Exit row
+                    } else {  // Exit row (index 4)
                         if (settingsDirty) syncPowerPauseSettings(true);
                         enterMenuScreen();
                     }
@@ -775,4 +794,24 @@ void loop() {
             saveSystemTimer();
         }
     }
+
+#if DEBUG_OVERLAY_PREVIEW
+    // ------------------------------------------------------------------
+    // Debug overlay preview carousel
+    // When sitting on the main menu, cycle through every warning overlay
+    // on a 3-second rotation so the UI can be verified without fault conditions.
+    // ------------------------------------------------------------------
+    if (currentScreen == SCREEN_MENU) {
+        static unsigned long lastOverlayPreviewTime = 0;
+        static uint8_t       overlayPreviewStage    = 0;
+        const uint8_t        OVERLAY_STAGE_COUNT    = 5;
+        const unsigned long  OVERLAY_INTERVAL_MS    = 3000;
+
+        if (lastOverlayPreviewTime == 0 || (now - lastOverlayPreviewTime) >= OVERLAY_INTERVAL_MS) {
+            lastOverlayPreviewTime = now;
+            drawDebugOverlayPreview(overlayPreviewStage);
+            overlayPreviewStage = (overlayPreviewStage + 1) % OVERLAY_STAGE_COUNT;
+        }
+    }
+#endif
 }

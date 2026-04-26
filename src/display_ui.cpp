@@ -31,6 +31,9 @@ extern bool lightThemeEnabled;
 static TFT_eSprite pressSprite(&tft);
 static bool        pressSpritReady = false;
 
+static TFT_eSprite motorSprite(&tft);
+static bool        motorSpriteReady = false;
+
 extern bool overTempActive;
 extern bool overTempWarning;
 extern bool overTempShutdown;
@@ -388,6 +391,15 @@ void drawRuntimeStatic(DisplayUnits units) {
   if (!pressSpritReady) {
     Serial.println("[WARN] pressSprite alloc failed – fallback to direct draw");
   }
+
+  // ---- Create motor-power sprite for flicker-free turbine output updates ----
+  const int motorZoneH = (THIRD_2_Y - 24) - (THIRD_1_Y + 1);
+  motorSprite.deleteSprite();
+  motorSprite.setColorDepth(16);
+  motorSpriteReady = (motorSprite.createSprite(SCREEN_WIDTH, motorZoneH) != nullptr);
+  if (!motorSpriteReady) {
+    Serial.println("[WARN] motorSprite alloc failed – fallback to direct draw");
+  }
 }
 
 void drawRuntimeTarget(float target, float current, DisplayUnits units, bool valid, bool forceRedraw, uint16_t motorSpeed) {
@@ -648,30 +660,44 @@ void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw) {
   }
   lastSpeed = motorSpeed;
 
-  // Clear middle third value area (above the static label row)
-  tft.fillRect(0, THIRD_1_Y + 1, SCREEN_WIDTH, (THIRD_2_Y - 24) - THIRD_1_Y - 1, COLOR_BG);
-
   // Clamp to 0-100 for display
   uint16_t pct = (motorSpeed > 1000) ? 100 : (motorSpeed / 10);
 
   char buf[8];
   snprintf(buf, sizeof(buf), "%3u%%", pct);
 
-  tft.setFreeFont(&FreeSansBold18pt7b);
-  tft.setTextSize(2);
-  tft.setTextColor(TFT_CYAN, COLOR_BG);
+  const int zoneTop = THIRD_1_Y + 1;
+  const int zoneBot = THIRD_2_Y - 24;  // leave room for static label
+  const int zoneH   = zoneBot - zoneTop;
 
-  int16_t w = tft.textWidth(buf);
-  int16_t h = tft.fontHeight();
+  if (motorSpriteReady) {
+    // ---- Sprite path: render off-screen then blit atomically (no flicker) ----
+    motorSprite.fillSprite(COLOR_BG);
+    motorSprite.setFreeFont(&FreeSansBold18pt7b);
+    motorSprite.setTextSize(2);
+    motorSprite.setTextColor(TFT_CYAN, COLOR_BG);
 
-  int zoneTop = THIRD_1_Y + 1;
-  int zoneBot = THIRD_2_Y - 24;  // leave room for static label
-  int zoneH   = zoneBot - zoneTop;
+    int16_t w = motorSprite.textWidth(buf);
+    int16_t h = motorSprite.fontHeight();
+    int x = (SCREEN_WIDTH - w) / 2;
+    int y = (zoneH + h) / 2 - 15;  // vertically centre baseline within sprite
+    motorSprite.setCursor(x, y);
+    motorSprite.print(buf);
+    motorSprite.pushSprite(0, zoneTop);
+  } else {
+    // ---- Fallback: direct draw ----
+    tft.fillRect(0, zoneTop, SCREEN_WIDTH, zoneH, COLOR_BG);
+    tft.setFreeFont(&FreeSansBold18pt7b);
+    tft.setTextSize(2);
+    tft.setTextColor(TFT_CYAN, COLOR_BG);
 
-  int x = (SCREEN_WIDTH - w) / 2;
-  int y = zoneTop + (zoneH + h) / 2 - 15;  // vertically centre baseline
-  tft.setCursor(x, y);
-  tft.print(buf);
+    int16_t w = tft.textWidth(buf);
+    int16_t h = tft.fontHeight();
+    int x = (SCREEN_WIDTH - w) / 2;
+    int y = zoneTop + (zoneH + h) / 2 - 15;
+    tft.setCursor(x, y);
+    tft.print(buf);
+  }
 
   tft.setTextFont(1);
   tft.setTextSize(1);

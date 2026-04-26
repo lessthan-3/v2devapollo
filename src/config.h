@@ -216,8 +216,8 @@
 #define MENU_OPTION_HEIGHT      40
 #define MENU_TOP_Y              90
 #define SETTINGS_OPTION_COUNT   5
-#define SETTINGS_OPTION_HEIGHT  40
-#define SETTINGS_TOP_Y          85
+#define SETTINGS_OPTION_HEIGHT  44
+#define SETTINGS_TOP_Y          55
 #define SUPPORT_OPTION_COUNT    4
 #define MINMAX_FLASH_MS         500
 
@@ -250,6 +250,18 @@
 #define SERIAL_DEBUG_INTERVAL_MS        1000    // Serial debug output
 #define TEMP_READ_INTERVAL_MS           1000    // Temperature polling
 #define DEBUG_REPORT_INTERVAL_MS        3000    // Motor control debug report
+
+// ============================================================================
+// PSI Display Mode
+// ============================================================================
+// By default the SYSTEM PRESSURE zone always shows the actual measured PSI in
+// green.  Define SHOW_SET_PREVIEW (via build_flags or here) to restore the
+// alternate behaviour where turning the encoder briefly shows the set-point
+// value for 1 second before reverting to the actual reading.
+//
+// To enable: add   -DSHOW_SET_PREVIEW   to build_flags in platformio.ini
+// or uncomment:
+#define SHOW_SET_PREVIEW 1
 
 // ============================================================================
 // Debug Flags

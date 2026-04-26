@@ -20,6 +20,11 @@ extern bool lightThemeEnabled;
 #define COLOR_LABEL        (lightThemeEnabled ? (uint16_t)TFT_BLACK      : (uint16_t)TFT_WHITE)
 #undef  COLOR_TEXT_SECONDARY
 #define COLOR_TEXT_SECONDARY (lightThemeEnabled ? (uint16_t)TFT_DARKGREY : (uint16_t)TFT_LIGHTGREY)
+// Green reads poorly on a white background — use dark green in light mode
+#undef  COLOR_SUCCESS
+#define COLOR_SUCCESS        (lightThemeEnabled ? (uint16_t)TFT_DARKGREEN : (uint16_t)TFT_GREEN)
+#undef  COLOR_RUNTIME
+#define COLOR_RUNTIME        (lightThemeEnabled ? (uint16_t)TFT_DARKGREEN : (uint16_t)TFT_GREEN)
 
 // ---------------------------------------------------------------------------
 // Pressure-zone sprite — renders the large number off-screen then blits
@@ -72,8 +77,14 @@ void drawMenuFooter(const char* message, uint16_t color) {
   tft.fillRect(0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 40, COLOR_BG);
   if (message != NULL && message[0] != '\0') {
     tft.setTextColor(color, COLOR_BG);
-    tft.setTextSize(2);
-    tft.setCursor(20, SCREEN_HEIGHT - 30);
+    int len = (int)strlen(message);
+    if (len * 18 <= SCREEN_WIDTH - 20) {
+      tft.setTextSize(3);
+      tft.setCursor((SCREEN_WIDTH - len * 18) / 2, SCREEN_HEIGHT - 32);
+    } else {
+      tft.setTextSize(2);
+      tft.setCursor((SCREEN_WIDTH - len * 12) / 2, SCREEN_HEIGHT - 30);
+    }
     tft.print(message);
   }
 }
@@ -220,7 +231,7 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   const int textAreaX  = iconGutter;
   const int textAreaW  = SCREEN_WIDTH - iconGutter - 40;  // 40px right margin
 
-  const char* options[MENU_OPTION_COUNT] = {"Start Motor", "Settings", "Timers", "Support", "About"};
+  const char* options[MENU_OPTION_COUNT] = {"START MOTOR", "SETTINGS", "TIMERS", "SUPPORT", "ABOUT"};
 
   for (uint8_t i = 0; i < MENU_OPTION_COUNT; i++) {
     int y    = MENU_TOP_Y + (i * MENU_OPTION_HEIGHT);
@@ -239,17 +250,17 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
     uint16_t iconColor = selected ? COLOR_TEXT_PRIMARY : COLOR_TEXT_SECONDARY;
     drawMenuIcon(i, 20, rowCy, iconColor);
 
-    // Text — built-in font size 2, colour changes for selected row
+    // Text — built-in font size 3 (all caps, matches title), colour changes for selected row
     uint16_t fg = selected ? TFT_BLACK : COLOR_TEXT_PRIMARY;
     uint16_t bg = selected ? COLOR_MENU_SELECT : COLOR_BG;
 
     tft.setFreeFont(nullptr);
-    tft.setTextSize(2);
+    tft.setTextSize(3);
     tft.setTextColor(fg, bg);
 
-    int16_t tw = strlen(options[i]) * 12;  // 12px per char at size 2
+    int16_t tw = strlen(options[i]) * 18;  // 18px per char at size 3
     int tx = textAreaX + (textAreaW - tw) / 2;
-    int ty = y - 5 + (MENU_OPTION_HEIGHT - 16) / 2;  // 16px tall at size 2
+    int ty = y - 5 + (MENU_OPTION_HEIGHT - 24) / 2;  // 24px tall at size 3
     tft.setCursor(tx, ty);
     tft.print(options[i]);
   }
@@ -262,8 +273,14 @@ void drawPowerPauseSettingsFooter(const char* message, uint16_t color) {
   tft.fillRect(0, SCREEN_HEIGHT - 40, SCREEN_WIDTH, 40, COLOR_BG);
   if (message != NULL && message[0] != '\0') {
     tft.setTextColor(color, COLOR_BG);
-    tft.setTextSize(2);
-    tft.setCursor(20, SCREEN_HEIGHT - 30);
+    int len = (int)strlen(message);
+    if (len * 18 <= SCREEN_WIDTH - 20) {
+      tft.setTextSize(3);
+      tft.setCursor((SCREEN_WIDTH - len * 18) / 2, SCREEN_HEIGHT - 32);
+    } else {
+      tft.setTextSize(2);
+      tft.setCursor((SCREEN_WIDTH - len * 12) / 2, SCREEN_HEIGHT - 30);
+    }
     tft.print(message);
   }
 }
@@ -292,8 +309,12 @@ void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, 
   tft.fillScreen(COLOR_BG);
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
   tft.setTextSize(3);
-  tft.setCursor(110, 20);
-  tft.print("SETTINGS");
+  {
+    const char* title = "SETTINGS";
+    int tw = strlen(title) * 18;
+    tft.setCursor((SCREEN_WIDTH - tw) / 2, 14);
+    tft.print(title);
+  }
 
   for (uint8_t i = 0; i < SETTINGS_OPTION_COUNT; i++) {
     bool selected = (i == settingsIndex);
@@ -309,7 +330,9 @@ void drawPowerPauseSettingsScreen(uint8_t settingsIndex, uint16_t pauseSeconds, 
 
 void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, bool beeperEnabled, uint16_t warnSeconds, DisplayUnits units, bool selected, bool editing) {
   const char* options[5] = {"PowerPause Timeout", "Audible Beeper", "Units", "Theme", "Exit"};
-  int y = SETTINGS_TOP_Y + (settingsIndex * SETTINGS_OPTION_HEIGHT);
+  int rowTop = SETTINGS_TOP_Y + (settingsIndex * SETTINGS_OPTION_HEIGHT);
+  // Vertically centre size-3 text (24 px tall) within the row
+  int textY  = rowTop + (SETTINGS_OPTION_HEIGHT - 24) / 2;
   uint16_t bg = COLOR_BG;
   uint16_t fg = COLOR_TEXT_PRIMARY;
   if (selected) {
@@ -317,25 +340,30 @@ void drawPowerPauseSettingsRow(uint8_t settingsIndex, uint16_t pauseSeconds, boo
     fg = TFT_BLACK;
   }
 
-  tft.fillRect(40, y - 5, SCREEN_WIDTH - 80, SETTINGS_OPTION_HEIGHT, bg);
+  // Full-width fill gives a consistent rectangular highlight
+  tft.fillRect(0, rowTop, SCREEN_WIDTH, SETTINGS_OPTION_HEIGHT, bg);
   tft.setTextColor(fg, bg);
-  tft.setTextSize(2);
-  tft.setCursor(60, y);
+  tft.setTextSize(3);
+  tft.setCursor(16, textY);
   tft.print(options[settingsIndex]);
 
   if (settingsIndex == 0) {
+    // "%3u%%" max 4 chars * 18px = 72px; right-align with 8px margin
     uint16_t pct = (uint16_t)((uint32_t)pauseSeconds * 100u / POWER_PAUSE_PCT_BASE);
-    tft.setCursor(SCREEN_WIDTH - 110, y);
+    tft.setCursor(SCREEN_WIDTH - 72 - 8, textY);
     tft.printf("%3u%%", pct);
   } else if (settingsIndex == 1) {
-    tft.setCursor(SCREEN_WIDTH - 100, y);
-    tft.print(beeperEnabled ? "ON" : "OFF");
+    // "OFF" max 3 chars * 18px = 54px
+    tft.setCursor(SCREEN_WIDTH - 54 - 8, textY);
+    tft.print(beeperEnabled ? " ON" : "OFF");
   } else if (settingsIndex == 2) {
-    tft.setCursor(SCREEN_WIDTH - 150, y);
+    // "IMPERIAL" 8 chars * 18px = 144px
+    tft.setCursor(SCREEN_WIDTH - 144 - 8, textY);
     tft.print(units == UNITS_IMPERIAL ? "IMPERIAL" : "  METRIC");
   } else if (settingsIndex == 3) {
-    tft.setCursor(SCREEN_WIDTH - 120, y);
-    tft.print(lightThemeEnabled ? " LIGHT" : "  DARK");
+    // " LIGHT" 6 chars * 18px = 108px
+    tft.setCursor(SCREEN_WIDTH - 108 - 8, textY);
+    tft.print(lightThemeEnabled ? " LIGHT" : "  DARK ");
   }
 }
 
@@ -403,25 +431,26 @@ void drawRuntimeStatic(DisplayUnits units) {
 }
 
 void drawRuntimeTarget(float target, float current, DisplayUnits units, bool valid, bool forceRedraw, uint16_t motorSpeed) {
+  (void)motorSpeed;  // reserved for future use
   static float lastTarget = -999.0f;
   static float lastCurrent = -999.0f;
   static bool lastValid = false;
   static uint16_t lastColor = 0;
   static DisplayUnits lastUnits = UNITS_IMPERIAL;
-  static bool lastShowActual = false;
-  static uint32_t targetChangedAt = 0;
 
-  // Track when the set pressure changes — show set pressure in green for 1 second
+#ifdef SHOW_SET_PREVIEW
+  // SHOW_SET_PREVIEW mode: when the user turns the encoder, briefly show the
+  // set-pressure value in the display zone for 1 second, then revert to actual.
+  static uint32_t targetChangedAt = 0;
   if (fabsf(target - lastTarget) >= 0.05f && lastTarget != -999.0f) {
     targetChangedAt = millis();
   }
   bool showingSetPreview = (targetChangedAt != 0) && (millis() - targetChangedAt < 1000UL);
-
-  // Determine if we should show actual pressure in orange:
-  // motor at 100% power and set pressure is more than 0.5 PSI away from actual,
-  // but not during the 1-second preview window after the user changes the set pressure
-  bool showActual = !showingSetPreview && (motorSpeed >= 100) && valid && (target > 0.05f) &&
-                    (fabsf(target - current) > 0.5f);
+  static bool lastShowingSetPreview = false;
+#else
+  // Default mode: always display the actual measured pressure.
+  constexpr bool showingSetPreview = false;
+#endif
 
   // Convert to display units
   float displayTarget = target;
@@ -433,35 +462,43 @@ void drawRuntimeTarget(float target, float current, DisplayUnits units, bool val
     if (displayCurrent < 0.0f) displayCurrent = 0.0f;
   }
 
-  // Color: orange when at max power and off-target, otherwise green (or grey when inactive)
-  uint16_t color = showActual ? COLOR_WARNING : TFT_GREEN;
-  if (target <= 0.05f) color = TFT_DARKGREY;          // motor off / dialled to zero
-  else if (!valid) color = TFT_DARKGREY;
-
-  static bool lastShowingSetPreview = false;
+  // Color: always green (theme-aware) while running, grey when motor off or reading invalid
+  uint16_t color = COLOR_SUCCESS;
+  if (target <= 0.05f) color = TFT_DARKGREY;  // motor off / dialled to zero
+  else if (!valid)     color = TFT_DARKGREY;
 
   if (!forceRedraw && fabsf(target - lastTarget) < 0.05f &&
       fabsf(current - lastCurrent) < 0.05f &&
-      valid == lastValid && color == lastColor && units == lastUnits &&
-      showActual == lastShowActual && showingSetPreview == lastShowingSetPreview) {
+      valid == lastValid && color == lastColor && units == lastUnits
+#ifdef SHOW_SET_PREVIEW
+      && showingSetPreview == lastShowingSetPreview
+#endif
+     ) {
     return;
   }
 
-  lastTarget            = target;
-  lastCurrent           = current;
-  lastValid             = valid;
-  lastColor             = color;
-  lastUnits             = units;
-  lastShowActual        = showActual;
+  lastTarget  = target;
+  lastCurrent = current;
+  lastValid   = valid;
+  lastColor   = color;
+  lastUnits   = units;
+#ifdef SHOW_SET_PREVIEW
   lastShowingSetPreview = showingSetPreview;
+#endif
 
   // Usable drawing height (above the label strip)
   const int zoneH = THIRD_1_Y - 24;
 
   // Helper lambda: build the numeric and unit strings from displayValue.
   // Called inside both the sprite and fallback branches.
+  // With SHOW_SET_PREVIEW: show set pressure briefly when knob is turned.
+  // Without SHOW_SET_PREVIEW (default): always show actual measured pressure.
   auto buildStrings = [&](char* numStr, size_t numSz, char* unitStr, size_t unitSz) {
-    float displayValue = showActual ? displayCurrent : displayTarget;
+#ifdef SHOW_SET_PREVIEW
+    float displayValue = showingSetPreview ? displayTarget : displayCurrent;
+#else
+    float displayValue = displayCurrent;
+#endif
     if (units == UNITS_IMPERIAL) {
       float v = displayValue;
       if (v < 0.0f)  v = 0.0f;
@@ -566,16 +603,6 @@ void drawRuntimeTarget(float target, float current, DisplayUnits units, bool val
 }
 
 void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw) {
-  static uint32_t lastJobTime = 0xFFFFFFFF;
-  if (!forceRedraw && jobTimeSeconds == lastJobTime) {
-    return;
-  }
-  lastJobTime = jobTimeSeconds;
-
-  // Bottom zone — right half: hours
-  const int infoLineY = THIRD_2_Y + 22;
-  tft.fillRect(SCREEN_WIDTH / 2, infoLineY, SCREEN_WIDTH / 2, 16, COLOR_BG);
-
   uint32_t hours   = jobTimeSeconds / 3600;
   uint32_t minutes = (jobTimeSeconds % 3600) / 60;
 
@@ -583,6 +610,15 @@ void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw) {
   snprintf(buf, sizeof(buf), "HOURS  %03lu:%02lu",
            (unsigned long)hours, (unsigned long)minutes);
 
+  static char lastBuf[24] = "";
+  if (!forceRedraw && strcmp(buf, lastBuf) == 0) {
+    return;
+  }
+  strncpy(lastBuf, buf, sizeof(lastBuf));
+
+  // Bottom zone — right half: hours
+  // Overdraw with background colour — no fillRect flash
+  const int infoLineY = THIRD_2_Y + 22;
   tft.setTextFont(1);
   tft.setTextSize(2);
   tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
@@ -593,48 +629,42 @@ void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw) {
 }
 
 void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw) {
-  static float lastTemp = -999.0f;
-  static DisplayUnits lastUnits = UNITS_IMPERIAL;
-  static bool lastWarning  = false;
-  static bool lastShutdown = false;
-  if (!forceRedraw && fabsf(tempC - lastTemp) < 0.5f && lastTemp != -999.0f && units == lastUnits
-      && lastWarning == overTempWarning && lastShutdown == overTempShutdown) {
-    return;
-  }
-  lastTemp     = tempC;
-  lastUnits    = units;
-  lastWarning  = overTempWarning;
-  lastShutdown = overTempShutdown;
-
-  // Bottom zone — left half: temperature
-  const int infoLineY = THIRD_2_Y + 22;
-  tft.fillRect(0, infoLineY, SCREEN_WIDTH / 2, 16, COLOR_BG);
-
+  // Build the display string first — compare before touching the display
+  // All branches are padded to the same 14-char width to avoid leftover pixels
   char buf[32];
   if (overTempShutdown) {
     snprintf(buf, sizeof(buf), "TEMP  SHUTDOWN");
   } else if (overTempWarning) {
     if (tempC < -100.0f) {
-      snprintf(buf, sizeof(buf), "TEMP  WARN");
+      snprintf(buf, sizeof(buf), "TEMP  WARN    ");
     } else {
       if (units == UNITS_IMPERIAL) {
         float tempF = (tempC * 9.0f / 5.0f) + 32.0f;
-        snprintf(buf, sizeof(buf), "TEMP  %3.0f F!", tempF);
+        snprintf(buf, sizeof(buf), "TEMP  %3.0f F! ", tempF);
       } else {
-        snprintf(buf, sizeof(buf), "TEMP  %3.0f C!", tempC);
+        snprintf(buf, sizeof(buf), "TEMP  %3.0f C! ", tempC);
       }
     }
   } else if (tempC < -100.0f) {
-    snprintf(buf, sizeof(buf), "TEMP  ---");
+    snprintf(buf, sizeof(buf), "TEMP  ---     ");
   } else {
     if (units == UNITS_IMPERIAL) {
       float tempF = (tempC * 9.0f / 5.0f) + 32.0f;
-      snprintf(buf, sizeof(buf), "TEMP  %3.0f F", tempF);
+      snprintf(buf, sizeof(buf), "TEMP  %3.0f F  ", tempF);
     } else {
-      snprintf(buf, sizeof(buf), "TEMP  %3.0f C", tempC);
+      snprintf(buf, sizeof(buf), "TEMP  %3.0f C  ", tempC);
     }
   }
 
+  static char lastBuf[32] = "";
+  if (!forceRedraw && strcmp(buf, lastBuf) == 0) {
+    return;
+  }
+  strncpy(lastBuf, buf, sizeof(lastBuf));
+
+  // Bottom zone — left half: temperature
+  // Overdraw with background colour — no fillRect flash
+  const int infoLineY = THIRD_2_Y + 22;
   tft.setTextFont(1);
   tft.setTextSize(2);
   uint16_t tempTextColor = COLOR_TEXT_SECONDARY;
@@ -643,7 +673,7 @@ void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw) {
   tft.setTextColor(tempTextColor, COLOR_BG);
   // Right-align so the text ends ~1/8 screen (60px) from the centre divider
   {
-    int16_t tw = strlen(buf) * 12;  // ~12px per char at size 2
+    int16_t tw = (int16_t)(strlen(buf) * 12);  // ~12px per char at size 2
     int16_t tx = (SCREEN_WIDTH / 2) - 60 - tw;
     if (tx < 0) tx = 0;
     tft.setCursor(tx, infoLineY);
@@ -670,12 +700,15 @@ void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw) {
   const int zoneBot = THIRD_2_Y - 24;  // leave room for static label
   const int zoneH   = zoneBot - zoneTop;
 
+  // Light mode → dark blue (navy); dark mode → light blue (cyan)
+  uint16_t motorPctColor = lightThemeEnabled ? (uint16_t)TFT_NAVY : (uint16_t)TFT_CYAN;
+
   if (motorSpriteReady) {
     // ---- Sprite path: render off-screen then blit atomically (no flicker) ----
     motorSprite.fillSprite(COLOR_BG);
     motorSprite.setFreeFont(&FreeSansBold18pt7b);
     motorSprite.setTextSize(2);
-    motorSprite.setTextColor(TFT_CYAN, COLOR_BG);
+    motorSprite.setTextColor(motorPctColor, COLOR_BG);
 
     int16_t w = motorSprite.textWidth(buf);
     int16_t h = motorSprite.fontHeight();
@@ -689,7 +722,7 @@ void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw) {
     tft.fillRect(0, zoneTop, SCREEN_WIDTH, zoneH, COLOR_BG);
     tft.setFreeFont(&FreeSansBold18pt7b);
     tft.setTextSize(2);
-    tft.setTextColor(TFT_CYAN, COLOR_BG);
+    tft.setTextColor(motorPctColor, COLOR_BG);
 
     int16_t w = tft.textWidth(buf);
     int16_t h = tft.fontHeight();
@@ -799,11 +832,11 @@ void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining
     }
 
     // Sub-title line
-    tft.setTextSize(2);
+    tft.setTextSize(3);
     {
       const char* sub = "PowerPause Active";
-      int tw = strlen(sub) * 12;
-      tft.setCursor(OX + (OW - tw) / 2, OY + 48);
+      int tw = strlen(sub) * 18;
+      tft.setCursor(OX + (OW - tw) / 2, OY + 38);
       tft.print(sub);
     }
 
@@ -815,12 +848,12 @@ void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining
 
     if (idleState == IDLE_STATE_PID_RAMP) {
       tft.setTextSize(3);
-      const char* l1 = "Ramping to idle speed";
+      const char* l1 = "RAMPING TO IDLE SPEED";
       tft.setCursor(OX + (OW - (int)strlen(l1) * 18) / 2, botY + (botH / 2) - 12);
       tft.print(l1);
     } else if (idleState == IDLE_STATE_HOLD) {
-      const char* l1 = "Turn dial or press button";
-      const char* l2 = "to resume motor";
+      const char* l1 = "TURN DIAL OR PRESS BUTTON";
+      const char* l2 = "TO RESUME MOTOR";
       tft.setTextSize(3);
       int lineH = 28;
       if (secondsRemaining != UINT32_MAX) {
@@ -866,8 +899,6 @@ void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining
   tft.setTextSize(1);
 }
 
-extern bool overTempWarningAcknowledged;
-
 // ---------------------------------------------------------------------------
 // Over-temperature WARNING overlay (>= 230 F): motor keeps running
 // Matches the reference design: red banner top, white message bottom
@@ -879,9 +910,16 @@ void drawRuntimeOverTempOverlay(float tempC, bool forceRedraw) {
 
   bool isShutdown = overTempShutdown;
 
-  if (!forceRedraw && lastShown && fabsf(tempC - lastTemp) < 0.5f && lastShutdown == isShutdown) {
-    return;
+  // If only the temperature number changed (and chrome is already drawn) just repaint the value cell
+  bool chromeOnly = false;
+  if (!forceRedraw && lastShown && lastShutdown == isShutdown &&
+      fabsf(tempC - lastTemp) >= 0.5f) {
+    chromeOnly = true;  // skip full redraw, update number in-place
+  } else if (!forceRedraw && lastShown && lastShutdown == isShutdown &&
+             fabsf(tempC - lastTemp) < 0.5f) {
+    return;  // nothing changed at all
   }
+
   lastShown    = true;
   lastTemp     = tempC;
   lastShutdown = isShutdown;
@@ -890,52 +928,65 @@ void drawRuntimeOverTempOverlay(float tempC, bool forceRedraw) {
   const int OY = 40;
   const int OW = SCREEN_WIDTH  - (OX * 2);   // 460
   const int OH = SCREEN_HEIGHT - (OY * 2);   // 240
-
-  // ---- Outer border (double-line red) ----
-  tft.fillRect(OX, OY, OW, OH, TFT_BLACK);
-  for (int t = 0; t < 3; t++) {
-    tft.drawRect(OX + t, OY + t, OW - t * 2, OH - t * 2, TFT_RED);
-  }
-
-  // ---- Top red banner ----
   const int bannerH = OH / 2;
-  tft.fillRect(OX + 3, OY + 3, OW - 6, bannerH - 3, TFT_RED);
 
-  // Warning triangles — left and right of the title text
-  int triY  = OY + 3 + (bannerH - 3) / 2;
-  int triSz = 22;
-  drawWarningTriangle(OX + 28,      triY, triSz, TFT_YELLOW);
-  drawWarningTriangle(OX + OW - 28, triY, triSz, TFT_YELLOW);
+  if (!chromeOnly) {
+    // ---- Outer border (double-line red) ----
+    tft.fillRect(OX, OY, OW, OH, TFT_BLACK);
+    for (int t = 0; t < 3; t++) {
+      tft.drawRect(OX + t, OY + t, OW - t * 2, OH - t * 2, TFT_RED);
+    }
 
-  // "WARNING" title
-  tft.setTextColor(TFT_WHITE, TFT_RED);
-  tft.setFreeFont(nullptr);
-  tft.setTextSize(3);
-  {
-    const char* title = "WARNING";
-    int tw = strlen(title) * 18;
-    tft.setCursor(OX + (OW - tw) / 2, OY + 10);
-    tft.print(title);
+    // ---- Top red banner ----
+    tft.fillRect(OX + 3, OY + 3, OW - 6, bannerH - 3, TFT_RED);
+
+    // Warning triangles
+    int triY  = OY + 3 + (bannerH - 3) / 2;
+    int triSz = 22;
+    drawWarningTriangle(OX + 28,      triY, triSz, TFT_YELLOW);
+    drawWarningTriangle(OX + OW - 28, triY, triSz, TFT_YELLOW);
+
+    // "WARNING" title
+    tft.setTextColor(TFT_WHITE, TFT_RED);
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(3);
+    {
+      const char* title = "WARNING";
+      int tw = strlen(title) * 18;
+      tft.setCursor(OX + (OW - tw) / 2, OY + 10);
+      tft.print(title);
+    }
+
+    // "HIGH MOTOR TEMP"
+    tft.setTextSize(3);
+    {
+      const char* line2 = "HIGH MOTOR TEMP";
+      int tw = strlen(line2) * 18;
+      tft.setCursor(OX + (OW - tw) / 2, OY + 38);
+      tft.print(line2);
+    }
   }
 
-  // "HIGH MOTOR TEMPERATURE"
-  tft.setTextSize(2);
-  {
-    const char* line2 = "HIGH MOTOR TEMPERATURE";
-    int tw = strlen(line2) * 12;
-    tft.setCursor(OX + (OW - tw) / 2, OY + 46);
-    tft.print(line2);
-  }
-
-  // Temperature value in large text
+  // Temperature value — repaint over a solid red background to erase previous number
   if (tempC > -100.0f) {
     float tempF = (tempC * 9.0f / 5.0f) + 32.0f;
     char tempStr[12];
     snprintf(tempStr, sizeof(tempStr), "%.0f F", tempF);
+    // Clear the value cell first to avoid ghost digits
+    tft.fillRect(OX + 3, OY + 62, OW - 6, 28, TFT_RED);
+    tft.setTextColor(TFT_WHITE, TFT_RED);
+    tft.setFreeFont(nullptr);
     tft.setTextSize(3);
     int tw = strlen(tempStr) * 18;
-    tft.setCursor(OX + (OW - tw) / 2, OY + 76);
+    tft.setCursor(OX + (OW - tw) / 2, OY + 66);
     tft.print(tempStr);
+  }
+
+  if (chromeOnly) {
+    // Only needed to update the number — done
+    tft.setTextFont(1);
+    tft.setTextSize(1);
+    return;
   }
 
   // ---- Bottom white section ----
@@ -949,8 +1000,8 @@ void drawRuntimeOverTempOverlay(float tempC, bool forceRedraw) {
   if (isShutdown) {
     // Shutdown message — 3 lines, no interaction possible
     const char* l1 = "MOTOR SHUTDOWN";
-    const char* l2 = "Restart unit to continue";
-    const char* l3 = "Check Filters First";
+    const char* l2 = "RESTART UNIT TO CONTINUE";
+    const char* l3 = "CHECK FILTERS FIRST";
     const int lineH = 28;
     const int textBlockH = lineH * 3;
     int startY = botY + (botH - textBlockH) / 2;
@@ -963,22 +1014,16 @@ void drawRuntimeOverTempOverlay(float tempC, bool forceRedraw) {
     tft.print(l3);
   } else {
     // Warning-only message — motor still running; show "Press to continue" prompt
-    const char* l1 = "Check Filter Condition";
-    const char* l2 = "Cleaning may be required";
-    const char* l3 = "Press to continue";
+    const char* l1 = "CHECK FILTER CONDITION";
+    const char* l2 = "CLEANING MAY BE REQUIRED";
     const int lineH = 28;
-    const int textBlockH = lineH * 3 + 4;
+    const int textBlockH = lineH * 2;
     int startY = botY + (botH - textBlockH) / 2;
     tft.setTextSize(3);
     tft.setCursor(OX + (OW - (int)strlen(l1) * 18) / 2, startY);
     tft.print(l1);
     tft.setCursor(OX + (OW - (int)strlen(l2) * 18) / 2, startY + lineH);
     tft.print(l2);
-    // "Press to continue" in green to mark it as an action prompt
-    tft.setTextSize(3);
-    tft.setTextColor(TFT_DARKGREEN, TFT_WHITE);
-    tft.setCursor(OX + (OW - (int)strlen(l3) * 18) / 2, startY + lineH * 2 + 4);
-    tft.print(l3);
   }
 
   tft.setTextFont(1);
@@ -1019,13 +1064,17 @@ void drawRuntimeFilterWarningOverlay() {
     tft.print(title);
   }
 
-  // Sub-title line
-  tft.setTextSize(2);
+  // Sub-title line (split to two lines at size 3 to fit 460px overlay width)
+  tft.setTextSize(3);
   {
-    const char* sub = "Filter Maintenance Required";
-    int tw = strlen(sub) * 12;
-    tft.setCursor(OX + (OW - tw) / 2, OY + 48);
-    tft.print(sub);
+    const char* sub1 = "FILTER MAINTENANCE";
+    const char* sub2 = "REQUIRED";
+    int tw1 = strlen(sub1) * 18;
+    int tw2 = strlen(sub2) * 18;
+    tft.setCursor(OX + (OW - tw1) / 2, OY + 38);
+    tft.print(sub1);
+    tft.setCursor(OX + (OW - tw2) / 2, OY + 66);
+    tft.print(sub2);
   }
 
   // ---- Bottom white section ----
@@ -1037,19 +1086,16 @@ void drawRuntimeFilterWarningOverlay() {
   tft.setFreeFont(nullptr);
   tft.setTextSize(3);
 
-  const char* l1 = "Clean Your Filters";
-  const char* l2 = "Restore Performance";
-  const char* l3 = "Reset Filter Timer";
+  const char* l1 = "CLEAN YOUR FILTERS";
+  const char* l2 = "RESET FILTER TIMER";
   const int lineH = 28;
-  const int textBlockH = lineH * 3;
+  const int textBlockH = lineH * 2;
   int startY = botY + (botH - textBlockH) / 2;
 
   tft.setCursor(OX + (OW - (int)strlen(l1) * 18) / 2, startY);
   tft.print(l1);
   tft.setCursor(OX + (OW - (int)strlen(l2) * 18) / 2, startY + lineH);
   tft.print(l2);
-  tft.setCursor(OX + (OW - (int)strlen(l3) * 18) / 2, startY + lineH * 2);
-  tft.print(l3);
 
   tft.setTextFont(1);
   tft.setTextSize(1);
@@ -1101,22 +1147,29 @@ void drawSupportMenuScreen(uint8_t menuIndex) {
   tft.drawFastHLine(0, 50, SCREEN_WIDTH, COLOR_TEXT_PRIMARY);
 
   const char* options[4] = {"Frequently Asked Questions", "Technical Information", "Contact Us", "Return To Main Menu"};
-  // Spread 4 items evenly between y=70 and y=270
-  const int startY  = 80;
-  const int stepY   = 52;
+  // 4 items from y=68, step=56: last item ends ~296, footer at 280 (items are clipped above footer)
+  const int startY  = 68;
+  const int stepY   = 56;
+  const int boxH    = 44;  // tall enough for size-3 text (24px) with 10px padding each side
 
   for (uint8_t i = 0; i < 4; i++) {
     int y = startY + i * stepY;
     if (i == menuIndex) {
-      tft.fillRect(20, y - 8, SCREEN_WIDTH - 40, 32, COLOR_MENU_SELECT);
+      tft.fillRect(0, y - 8, SCREEN_WIDTH, boxH, COLOR_MENU_SELECT);
       tft.setTextColor(TFT_BLACK, COLOR_MENU_SELECT);
     } else {
-      tft.fillRect(20, y - 8, SCREEN_WIDTH - 40, 32, COLOR_BG);
+      tft.fillRect(0, y - 8, SCREEN_WIDTH, boxH, COLOR_BG);
       tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
     }
-    tft.setTextSize(2);
-    int textW = strlen(options[i]) * 12;
-    tft.setCursor((SCREEN_WIDTH - textW) / 2, y);
+    // Auto-size: size 3 if the string fits within the screen width (minus 16px margin), else size 2
+    int len = (int)strlen(options[i]);
+    if (len * 18 <= SCREEN_WIDTH - 8) {
+      tft.setTextSize(3);
+      tft.setCursor((SCREEN_WIDTH - len * 18) / 2, y);
+    } else {
+      tft.setTextSize(2);
+      tft.setCursor((SCREEN_WIDTH - len * 12) / 2, y + 4);  // +4 to vertically centre smaller text
+    }
     tft.print(options[i]);
   }
 }
@@ -1124,48 +1177,45 @@ void drawSupportMenuScreen(uint8_t menuIndex) {
 void drawSupportFaqScreen(void) {
   tft.fillScreen(COLOR_BG);
 
-  // Title
+  // Title — two size-3 lines (single line at size 3 is 468px, too tight)
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.setTextSize(2);
-  int titleW = 26 * 12;
-  tft.setCursor((SCREEN_WIDTH - titleW) / 2, 12);
-  tft.print("Frequently Asked Questions");
+  tft.setTextSize(3);
+  const char* t1 = "Frequently Asked";
+  const char* t2 = "Questions";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(t1) * 18) / 2, 6);
+  tft.print(t1);
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(t2) * 18) / 2, 34);
+  tft.print(t2);
 
-  // QR code centred on screen
+  // QR code centred between title and footer
   int qrX = (SCREEN_WIDTH - 200) / 2;
-  int qrY = 50;
+  int qrY = 68;
   tft.pushImage(qrX, qrY, 200, 200, qrFaq);
 
   // Footer
-  tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(100, SCREEN_HEIGHT - 28);
-  tft.print("Press to return to menu");
+  drawMenuFooter("Press to return to menu", COLOR_SUCCESS);
 }
 
 void drawSupportTechScreen(void) {
   tft.fillScreen(COLOR_BG);
 
-  // Title lines
+  // Title lines — size 3
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor((SCREEN_WIDTH - 12 * 12) / 2, 8);
-  tft.print("USERS MANUAL");
-  tft.setTextSize(2);
-  int t2W = 20 * 12;
-  tft.setCursor((SCREEN_WIDTH - t2W) / 2, 30);
-  tft.print("Technical information");
+  tft.setTextSize(3);
+  const char* t1 = "USERS MANUAL";
+  const char* t2 = "Technical Information";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(t1) * 18) / 2, 6);
+  tft.print(t1);
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(t2) * 18) / 2, 34);
+  tft.print(t2);
 
-  // QR code centred
+  // QR code centred between title and footer
   int qrX = (SCREEN_WIDTH - 200) / 2;
-  int qrY = 55;
+  int qrY = 68;
   tft.pushImage(qrX, qrY, 200, 200, qrTech);
 
   // Footer
-  tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(100, SCREEN_HEIGHT - 28);
-  tft.print("Press to return to menu");
+  drawMenuFooter("Press to return to menu", COLOR_SUCCESS);
 }
 
 void drawSupportContactScreen(void) {
@@ -1179,29 +1229,25 @@ void drawSupportContactScreen(void) {
   tft.print("CONTACT US");
   tft.drawFastHLine(0, 48, SCREEN_WIDTH, COLOR_TEXT_PRIMARY);
 
-  // Contact details
+  // Contact details — size 3 (strings kept short enough to fit 480px)
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.setTextSize(2);
-  const int lx = SCREEN_WIDTH / 2;  // centre-aligned
+  tft.setTextSize(3);
   struct { const char* text; int y; } lines[] = {
-    { "Apollo Sprayers International, Inc.", 62 },
-    { "1030 Joshua Way",                    88 },
-    { "Vista, CA. 92081",                   114 },
-    { "Toll Free: (888) 900-HVLP (4857)",   140 },
-    { "E-Mail:  info@hvlp.com",             166 },
-    { "www.HVLP.com",                       192 },
+    { "Apollo Sprayers Inc.",   58  },
+    { "1030 Joshua Way",        92  },
+    { "Vista, CA. 92081",       126 },
+    { "Phone: (888) 900-4857",    160 },
+    { "Email: info@hvlp.com",          194 },
+    { "Web: www.HVLP.com",           228 },
   };
   for (auto& l : lines) {
-    int w = strlen(l.text) * 12;
+    int w = (int)strlen(l.text) * 18;
     tft.setCursor((SCREEN_WIDTH - w) / 2, l.y);
     tft.print(l.text);
   }
 
   // Footer
-  tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(100, SCREEN_HEIGHT - 28);
-  tft.print("Press to return to menu");
+  drawMenuFooter("Press to return to menu", COLOR_SUCCESS);
 }
 
 void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, uint8_t selectedOption) {
@@ -1219,8 +1265,8 @@ void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, 
 
   // --- Job Timer block ---
   const int block1Y = 65;
-  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
-  tft.setTextSize(2);
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(3);
   tft.setCursor(20, block1Y);
   tft.print("JOB TIMER");
 
@@ -1231,7 +1277,7 @@ void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, 
     snprintf(buf, sizeof(buf), "%02lu:%02u", (unsigned long)(jHours % 100), jTenths * 6);
     tft.setFreeFont(&FreeSansBold18pt7b);
     tft.setTextColor(COLOR_RUNTIME, COLOR_BG);  // always green
-    tft.setCursor(100, block1Y + 70);
+    tft.setCursor(100, 155);
     tft.print(buf);
     tft.setFreeFont(nullptr);  // back to GLCD
   }
@@ -1247,21 +1293,23 @@ void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, 
 
   // --- Filter Maintenance Timer block ---
   const int block2Y = 173;
-  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
-  tft.setTextSize(2);
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  tft.setTextSize(3);
   tft.setCursor(20, block2Y);
   tft.print("FILTER MAINTENANCE TIMER");
+
+  uint16_t fColor = lightThemeEnabled ? (uint16_t)TFT_NAVY : (uint16_t)TFT_CYAN;
 
   {
     uint32_t fHours  = totalRuntimeTenths / 10;
     uint8_t  fTenths = totalRuntimeTenths % 10;
     // Cyan/blue while healthy, red when >= 10 hours (100 tenths)
-    uint16_t fColor  = (totalRuntimeTenths < 100) ? COLOR_CURRENT : COLOR_ERROR;
+    uint16_t fColor  = (totalRuntimeTenths < 100) ? fColor : COLOR_ERROR;
     char buf[12];
     snprintf(buf, sizeof(buf), "%02lu:%02u", (unsigned long)(fHours % 100), fTenths * 6);
     tft.setFreeFont(&FreeSansBold18pt7b);
     tft.setTextColor(fColor, COLOR_BG);
-    tft.setCursor(100, block2Y + 70);
+    tft.setCursor(100, 273);
     tft.print(buf);
     tft.setFreeFont(nullptr);
   }
@@ -1322,17 +1370,21 @@ void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion
 
   // Product name (centred)
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(95, 68);
-  tft.print("PRECISION 6 PRO ELITE");
+  tft.setTextSize(3);
+  const char* prodName = "PRECISION 6 PRO ELITE";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(prodName) * 18) / 2, 66);
+  tft.print(prodName);
 
   // Software version
-  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(95, 100);
-  tft.print("Software Version V");
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.print(firmwareVersion);
+  tft.setTextSize(3);
+  {
+    // Build full string to centre it
+    char verBuf[32];
+    snprintf(verBuf, sizeof(verBuf), "Version V%s", firmwareVersion);
+    tft.setCursor((SCREEN_WIDTH - (int)strlen(verBuf) * 18) / 2, 110);
+    tft.print(verBuf);
+  }
 
   // System hours
   {
@@ -1341,23 +1393,21 @@ void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion
     char buf[24];
     snprintf(buf, sizeof(buf), "System Hours %02lu:%02u",
              (unsigned long)sHours, sTenths * 6);
-    tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
-    tft.setTextSize(2);
-    tft.setCursor(95, 132);
+    tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+    tft.setTextSize(3);
+    tft.setCursor((SCREEN_WIDTH - (int)strlen(buf) * 18) / 2, 154);
     tft.print(buf);
   }
 
   // Assembled in USA
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(130, 164);
-  tft.print("Assembled in USA");
+  tft.setTextSize(3);
+  const char* assembled = "Assembled in USA";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(assembled) * 18) / 2, 198);
+  tft.print(assembled);
 
-  // Footer — plain green text, same style as Support screen
-  tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
-  tft.setTextSize(2);
-  tft.setCursor(100, SCREEN_HEIGHT - 40);
-  tft.print("Press to return to menu");
+  // Footer
+  drawMenuFooter("Press to return to menu", COLOR_SUCCESS);
 }
 
 // ---------------------------------------------------------------------------

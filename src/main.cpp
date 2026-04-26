@@ -59,7 +59,6 @@ float       currentTemperatureC          = -999.0f;
 bool        overTempActive               = false;    // true when either warning or shutdown is active
 bool        overTempWarning              = false;    // true when >= TEMP_WARN_SETPOINT (motor keeps running)
 bool        overTempShutdown             = false;    // true when >= TEMP_SHUTDOWN_SETPOINT (restart required)
-bool        overTempWarningAcknowledged  = false;    // true after user presses button to dismiss warning overlay
 unsigned long overTempWarnBuzzStart      = 0;        // millis() when warning buzz started (0 = not active)
 
 // Screen / menu navigation
@@ -129,6 +128,10 @@ void enterRuntimeScreen(void) {
     // Seed the display timer from persisted flash value so it starts from
     // the saved total and counts up smoothly from there.
     startJobTimer(totalJobTimeTenths * 360UL);
+    // If the target is at minimum (motor off), start the timer in a paused state
+    if (targetPsi <= TARGET_PSI_MIN) {
+        pauseJobTimer();
+    }
     // Do not enable motor if any temp condition is active
     // (warning allows motor to run but shutdown does not)
     if (!overTempShutdown) {
@@ -148,19 +151,8 @@ void enterRuntimeScreen(void) {
 
     drawRuntimeTarget(targetPsi, currentPsi, displayUnits, pressureValid, true);
     drawRuntimeMotorPower(0, true);
-    drawRuntimeJobTime(0, true);
+    drawRuntimeJobTime(getJobTimeSeconds(), true);
     drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
-
-    // Filter maintenance warning (>= 10 hours)
-    if (totalRuntimeTenths >= 100) {
-        drawRuntimeFilterWarningOverlay();
-        delay(5000);
-        drawRuntimeStatic(displayUnits);
-        drawRuntimeTarget(targetPsi, currentPsi, displayUnits, pressureValid, true);
-        drawRuntimeMotorPower(0, true);
-        drawRuntimeJobTime(0, true);
-        drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
-    }
 }
 
 void enterSettingsScreen(void) {
@@ -353,6 +345,10 @@ void loop() {
         portEXIT_CRITICAL(&motorShared.mutex);
     }
 
+    // displaySpeed: clamp to 0 when target is zero (motor off) so the UI
+    // correctly shows 0% even if the motor task retains a small residual value.
+    uint16_t displaySpeed = (targetPsi <= TARGET_PSI_MIN) ? 0 : motorSpeed;
+
     // ------------------------------------------------------------------
     // Encoder input
     // ------------------------------------------------------------------
@@ -375,26 +371,43 @@ void loop() {
             }
 
         } else if (currentScreen == SCREEN_RUNTIME) {
-            // Encoder is fully locked out during shutdown — nothing on screen should change
+            // Shutdown locks the encoder entirely — nothing should change on that screen
             if (overTempShutdown) {
                 lastEncoderCount = encoderCount;  // consume the movement silently
             } else {
-                if (idleState != IDLE_STATE_OFF) {
-                    requestIdleExitSafe();
-                    resumeJobTimer();
-                }
-                float newTarget = targetPsi + (delta * TARGET_PSI_STEP);
-                targetPsi = constrain(newTarget, TARGET_PSI_MIN, TARGET_PSI_MAX);
-                setTargetPressureSafe(targetPsi);
-                requestPidReset();
+                // Accumulate raw ticks; 2 ticks = 1 step of TARGET_PSI_STEP (0.1 PSI),
+                // matching the 2-tick-per-step behaviour used on all other menus.
+                static int32_t runtimeEncAcc = 0;
+                runtimeEncAcc += (int32_t)delta;
+                int32_t steps = 0;
+                while (runtimeEncAcc >= 2)  { steps++;  runtimeEncAcc -= 2; }
+                while (runtimeEncAcc <= -2) { steps--;  runtimeEncAcc += 2; }
 
-                if (targetPsi <= TARGET_PSI_MIN) {
-                    setMotorEnabledSafe(false);
-                    drawRuntimeMotorPower(0, true);
-                } else {
-                    if (!overTempShutdown) setMotorEnabledSafe(true);
+                if (steps != 0) {
+                    if (idleState != IDLE_STATE_OFF) {
+                        requestIdleExitSafe();
+                        resumeJobTimer();
+                    }
+                    float newTarget = targetPsi + (steps * TARGET_PSI_STEP);
+                    targetPsi = constrain(newTarget, TARGET_PSI_MIN, TARGET_PSI_MAX);
+                    setTargetPressureSafe(targetPsi);
+                    requestPidReset();
+
+                    if (targetPsi <= TARGET_PSI_MIN) {
+                        setMotorEnabledSafe(false);
+                        pauseJobTimer();
+                        // Only update display if the overtemp overlay isn't covering the screen
+                        if (!overTempWarning) drawRuntimeMotorPower(0, true);
+                    } else {
+                        setMotorEnabledSafe(true);
+                        resumeJobTimer();
+                    }
+                    // Don't paint over the overtemp overlay — the new target will be
+                    // reflected on screen once the overlay clears
+                    if (!overTempWarning) {
+                        drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, false, motorSpeed);
+                    }
                 }
-                drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, false, motorSpeed);
             }
 
         } else if (currentScreen == SCREEN_SETTINGS) {
@@ -517,18 +530,9 @@ void loop() {
                 if (overTempShutdown) {
                     // Hard shutdown — button does nothing, unit must be restarted
                     // (silently consume the press)
-                } else if (overTempWarning && !overTempWarningAcknowledged) {
-                    // Acknowledge the warning overlay so motor continues uninterrupted
-                    overTempWarningAcknowledged = true;
-                    overTempActive = false;  // hide overlay; real overTempWarning flag stays true
-                    // Redraw the base runtime screen now that overlay is dismissed
-                    drawRuntimeStatic(displayUnits);
-                    drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, motorSpeed);
-                    drawRuntimeMotorPower(motorSpeed, true);
-                    drawRuntimeJobTime(getJobTimeSeconds(), true);
-                    drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
-                    Serial.println("Temp warning acknowledged — motor continues");
                 } else {
+                    // Normal press (includes during overTempWarning): stop motor and go to menu.
+                    // The overtemp overlay will persist on next entry to runtime until temp drops.
                     pauseJobTimer();
                     setMotorEnabledSafe(false);
                     enterMenuScreen();
@@ -645,7 +649,6 @@ void loop() {
             if (!overTempWarning) {
                 overTempWarning             = true;
                 overTempActive              = true;
-                overTempWarningAcknowledged = false;   // force overlay back on each new warning event
                 overTempWarnBuzzStart       = millis(); // start 1-second buzz
                 setBeeper(true);
                 Serial.printf("TEMP WARNING: %.1f C (%.1f F) — motor continues\n",
@@ -655,9 +658,8 @@ void loop() {
         }
         // --- Below warning --- clear warning only (shutdown flag persists until restart)
         else if (!overTempShutdown && overTempWarning) {
-            overTempWarning             = false;
-            overTempActive              = false;
-            overTempWarningAcknowledged = false;   // re-arm for next event
+            overTempWarning = false;
+            overTempActive  = false;
             Serial.println("Temperature normal: warning cleared");
         }
     }
@@ -691,8 +693,8 @@ void loop() {
         if (idleState != lastOverlayState) {
             if (idleState == IDLE_STATE_OFF && !overTempActive) {
                 drawRuntimeStatic(displayUnits);
-                drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, motorSpeed);
-                drawRuntimeMotorPower(motorSpeed, true);
+                drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
+                drawRuntimeMotorPower(displaySpeed, true);
                 drawRuntimeJobTime(getJobTimeSeconds(), true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             }
@@ -700,8 +702,8 @@ void loop() {
         } else if (overTempTransition && !overTempActive) {
             // Overtemp warning cleared — redraw base screen
             drawRuntimeStatic(displayUnits);
-            drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, motorSpeed);
-            drawRuntimeMotorPower(motorSpeed, true);
+            drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
+            drawRuntimeMotorPower(displaySpeed, true);
             drawRuntimeJobTime(getJobTimeSeconds(), true);
             drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
         }
@@ -714,12 +716,54 @@ void loop() {
             lastBeeperToggle = millis();
         }
 
-        // Overlays — overtemp takes priority over power-pause.
-        // Show when: shutdown (always), OR warning active and not yet acknowledged.
-        bool showOverTempOverlay = overTempShutdown || (overTempWarning && !overTempWarningAcknowledged);
-        if (showOverTempOverlay) {
-            drawRuntimeOverTempOverlay(currentTemperatureC, false);
-        } else if (idleState != IDLE_STATE_OFF) {
+        // ---- Overtemp WARNING flash: 3 s on, 2 s off (shutdown = always on) ----
+        static unsigned long overTempFlashTimer   = 0;
+        static bool          overTempOverlayShown = false;
+
+        const unsigned long OVERTEMP_ON_MS  = 3000;
+        const unsigned long OVERTEMP_OFF_MS = 2000;
+
+        if (overTempShutdown) {
+            // Hard shutdown — overlay is permanently on, no flashing
+            if (!overTempOverlayShown) {
+                overTempOverlayShown = true;
+                drawRuntimeOverTempOverlay(currentTemperatureC, true);
+            } else {
+                drawRuntimeOverTempOverlay(currentTemperatureC, false);
+            }
+        } else if (overTempWarning) {
+            if (!overTempOverlayShown && (now - overTempFlashTimer >= OVERTEMP_OFF_MS)) {
+                // Off period elapsed — show overlay, beep
+                overTempOverlayShown = true;
+                overTempFlashTimer   = now;
+                drawRuntimeOverTempOverlay(currentTemperatureC, true);
+                // Beep each time the overlay reappears (same 1-second buzz)
+                overTempWarnBuzzStart = now;
+                setBeeper(true);
+            } else if (overTempOverlayShown && (now - overTempFlashTimer >= OVERTEMP_ON_MS)) {
+                // On period elapsed — hide overlay, redraw runtime
+                overTempOverlayShown = false;
+                overTempFlashTimer   = now;
+                drawRuntimeStatic(displayUnits);
+                drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
+                drawRuntimeMotorPower(displaySpeed, true);
+                drawRuntimeJobTime(getJobTimeSeconds(), true);
+                drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
+            } else if (overTempOverlayShown) {
+                // Still within on period — keep overlay fresh
+                drawRuntimeOverTempOverlay(currentTemperatureC, false);
+            }
+        } else {
+            // Warning cleared — ensure overlay state is reset
+            if (overTempOverlayShown) {
+                overTempOverlayShown = false;
+                overTempFlashTimer   = 0;
+            }
+        }
+
+        bool showOverTempOverlay = overTempShutdown || (overTempWarning && overTempOverlayShown);
+
+        if (!overTempShutdown && !overTempWarning && idleState != IDLE_STATE_OFF) {
             uint32_t timeoutRemaining = UINT32_MAX;
             if (idleState == IDLE_STATE_HOLD) {
                 uint32_t idleDuration = (millis() - idleHoldEntryTime) / 1000;
@@ -742,13 +786,56 @@ void loop() {
             }
         }
 
-        // Periodic display refresh — suppressed while any overtemp overlay is showing
-        bool showOverTempOverlay2 = overTempShutdown || (overTempWarning && !overTempWarningAcknowledged);
+        // Periodic display refresh — suppressed while any overlay is visible
+        // showOverTempOverlay2 mirrors the flash state so we never draw over the overlay
+        bool showOverTempOverlay2 = overTempShutdown || (overTempWarning && overTempOverlayShown);
+
+        // ---- Filter maintenance flash (>= 10 hours) ----
+        // Show the filter warning overlay for 4s every 10s until the timer is reset.
+        static unsigned long filterFlashTimer   = 0;
+        static bool          filterOverlayShown = false;
+        const unsigned long  FILTER_ON_MS       = 4000;
+        const unsigned long  FILTER_OFF_MS      = 10000;
+
+        bool filterCondition = (totalRuntimeTenths >= 100) &&
+                               !showOverTempOverlay2 &&
+                               (idleState == IDLE_STATE_OFF);
+
+        if (filterCondition) {
+            if (!filterOverlayShown && (now - filterFlashTimer >= FILTER_OFF_MS)) {
+                filterOverlayShown = true;
+                filterFlashTimer   = now;
+                drawRuntimeFilterWarningOverlay();
+            } else if (filterOverlayShown && (now - filterFlashTimer >= FILTER_ON_MS)) {
+                filterOverlayShown = false;
+                filterFlashTimer   = now;
+                // Restore base runtime screen after overlay hides
+                drawRuntimeStatic(displayUnits);
+                drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
+                drawRuntimeMotorPower(displaySpeed, true);
+                drawRuntimeJobTime(getJobTimeSeconds(), true);
+                drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
+            }
+        } else if (filterOverlayShown) {
+            // Condition cleared (timer reset or overlay preempted) — restore base screen
+            filterOverlayShown = false;
+            filterFlashTimer   = 0;
+            if (!showOverTempOverlay2 && idleState == IDLE_STATE_OFF) {
+                drawRuntimeStatic(displayUnits);
+                drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
+                drawRuntimeMotorPower(displaySpeed, true);
+                drawRuntimeJobTime(getJobTimeSeconds(), true);
+                drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
+            }
+        }
+
+        bool anyOverlayShowing = showOverTempOverlay2 || filterOverlayShown || (idleState != IDLE_STATE_OFF);
+
         if (now - lastDisplayUpdate >= DISPLAY_PRESSURE_INTERVAL_MS) {
             lastDisplayUpdate = now;
-            if (idleState == IDLE_STATE_OFF && !showOverTempOverlay2) {
-                drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, false, motorSpeed);
-                drawRuntimeMotorPower(motorSpeed);
+            if (!anyOverlayShowing) {
+                drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, false, displaySpeed);
+                drawRuntimeMotorPower(displaySpeed);
                 drawRuntimeJobTime(getJobTimeSeconds());
                 drawRuntimeTemperature(currentTemperatureC, displayUnits);
             }
@@ -784,8 +871,8 @@ void loop() {
     // Hour meter & job timer (every 6 minutes = 0.1 hr)
     // ------------------------------------------------------------------
     if (millis() - lastHourMeterUpdate >= 360000UL) {
-        lastHourMeterUpdate = millis();
-        if (currentScreen == SCREEN_RUNTIME && getMotorSpeedSafe() > 0) {
+        if (currentScreen == SCREEN_RUNTIME && targetPsi > TARGET_PSI_MIN && getMotorSpeedSafe() > 0) {
+            lastHourMeterUpdate = millis();
             totalRuntimeTenths++;
             saveHourMeter();
             totalJobTimeTenths++;

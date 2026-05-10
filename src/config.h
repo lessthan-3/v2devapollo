@@ -143,8 +143,8 @@
 // Spike threshold: linearly interpolated between 3 PSI and MAX_PSI_THRESHOLD
 //   At 3.0 PSI  → 10 units (1.0%)
 //   At 8.5 PSI  → 30 units (3.0%)
-#define IDLE_SPIKE_UNITS_AT_3PSI    10.0f   // Spike threshold at 3 PSI (units 0-1000)
-#define IDLE_SPIKE_UNITS_AT_MAX     30.0f   // Spike threshold at MAX_PSI_THRESHOLD
+#define IDLE_SPIKE_UNITS_AT_3PSI    20.0f   // Spike threshold at 3 PSI (units 0-1000)
+#define IDLE_SPIKE_UNITS_AT_MAX     60.0f   // Spike threshold at MAX_PSI_THRESHOLD
 
 // Idle hold phase (2.5 PSI) — uses same window/spread but fixed spike threshold
 // at the 3 PSI floor value since IDLE_TARGET_PSI is below 3 PSI.
@@ -261,7 +261,7 @@
 //
 // To enable: add   -DSHOW_SET_PREVIEW   to build_flags in platformio.ini
 // or uncomment:
-#define SHOW_SET_PREVIEW 0
+//#define SHOW_SET_PREVIEW 0
 
 // ============================================================================
 // Debug Flags

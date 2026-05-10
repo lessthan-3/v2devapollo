@@ -405,25 +405,9 @@ void motorControlTask(void *parameter) {
                             nowSteady = ((maxS - minS) <= IDLE_SPEED_STABLE_SPREAD);
                         }
 
-                        // --- Steady-state transition logging ---
-                        if (nowSteady && !motorSteadyState) {
-                            motorSteadyState = true;
-                            if (!steadyStateLogged) {
-                                Serial.printf("[PowerPause] Steady state detected: speed=%u (mean=%.1f), target=%.1f PSI\n",
-                                              speed, bufMean, target);
-                                steadyStateLogged = true;
-                            }
-                        } else if (!nowSteady) {
-                            if (motorSteadyState) {
-                                Serial.printf("[PowerPause] Steady state lost: speed=%u, target=%.1f PSI\n",
-                                              speed, target);
-                            }
-                            motorSteadyState     = false;
-                            steadyStateLogged    = false;
-                            pidSaturatedLogged   = false;
-                        }
-
                         // --- PSI-scaled spike threshold ---
+                        // Computed before the state-transition check so it can be used
+                        // as the exit criterion once steady state is already established.
                         float spikeThreshold;
                         {
                             float ct = target;
@@ -434,21 +418,50 @@ void motorControlTask(void *parameter) {
                                              t * (IDLE_SPIKE_UNITS_AT_MAX - IDLE_SPIKE_UNITS_AT_3PSI);
                         }
 
+                        // --- Steady-state transition logic ---
+                        // Entry: buffer spread must be within IDLE_SPEED_STABLE_SPREAD.
+                        // Exit:  once steady, only a spike exceeding spikeThreshold
+                        //        (deviation of the live speed from the rolling mean)
+                        //        breaks steady state — prevents normal PID micro-jitter
+                        //        from repeatedly toggling the flag.
+                        if (nowSteady && !motorSteadyState) {
+                            motorSteadyState = true;
+                            if (!steadyStateLogged) {
+                                Serial.printf("[PowerPause] Steady state detected: speed=%u (mean=%.1f), target=%.1f PSI\n",
+                                              speed, bufMean, target);
+                                steadyStateLogged = true;
+                            }
+                        } else if (motorSteadyState && speedBufFull) {
+                            // Already in steady state — only exit on a real spike
+                            float deviation = fabsf((float)speed - bufMean);
+                            if (deviation > spikeThreshold) {
+                                Serial.printf("[PowerPause] Steady state lost: speed=%u, mean=%.1f, dev=%.1f (threshold=%.1f), target=%.1f PSI\n",
+                                              speed, bufMean, deviation, spikeThreshold, target);
+                                motorSteadyState     = false;
+                                steadyStateLogged    = false;
+                                pidSaturatedLogged   = false;
+                            }
+                        } else if (!motorSteadyState && !nowSteady) {
+                            // Not yet in steady state and buffer is still unsettled — no-op,
+                            // but clear logs so entry can fire cleanly next time.
+                            steadyStateLogged  = false;
+                            pidSaturatedLogged = false;
+                        }
+
                         // --- Idle counter update ---
                         if (motorSteadyState) {
-                            // Edge case: PID saturated at full power (mean ≈ 1000).
-                            // The motor cannot reach the setpoint so speed is "stable"
-                            // at 100% without the system actually being settled.
-                            // Switch to the MAX-mode pressure-stability algorithm:
-                            // track peak pressure and count only while pressure stays
-                            // within MAX_PRESSURE_DEVIATION_PSI of that peak.
-                            bool pidSaturated = (bufMean >= 990.0f);
+                            // Edge case: motor running near or at full power (mean close to 1000).
+                            // When bufMean is within spikeThreshold of the ceiling, a real
+                            // demand spike cannot be observed — the speed would need to exceed
+                            // 1000 to register. Switch to the pressure-stability algorithm in
+                            // this region so we don't falsely declare the system settled.
+                            bool pidSaturated = (bufMean >= (1000.0f - spikeThreshold));
 
                             if (pidSaturated) {
                                 // --- Saturated-speed path: mirror MAX-mode pressure logic ---
                                 if (!pidSaturatedLogged) {
-                                    Serial.printf("[PowerPause] PID saturated at 100%% speed — using pressure-stability algorithm (peak=%.2f PSI)\n",
-                                                  maxPressureRecorded);
+                                    Serial.printf("[PowerPause] Near/at 100%% speed (mean=%.1f, threshold=%.1f) — using pressure-stability algorithm (peak=%.2f PSI)\n",
+                                                  bufMean, spikeThreshold, maxPressureRecorded);
                                     pidSaturatedLogged = true;
                                 }
 

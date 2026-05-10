@@ -151,7 +151,7 @@ void enterRuntimeScreen(void) {
 
     drawRuntimeTarget(targetPsi, currentPsi, displayUnits, pressureValid, true);
     drawRuntimeMotorPower(0, true);
-    drawRuntimeJobTime(getJobTimeSeconds(), true);
+    drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
     drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
 }
 
@@ -695,7 +695,7 @@ void loop() {
                 drawRuntimeStatic(displayUnits);
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed, true);
-                drawRuntimeJobTime(getJobTimeSeconds(), true);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             }
             lastOverlayState = idleState;
@@ -704,7 +704,7 @@ void loop() {
             drawRuntimeStatic(displayUnits);
             drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
             drawRuntimeMotorPower(displaySpeed, true);
-            drawRuntimeJobTime(getJobTimeSeconds(), true);
+            drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
             drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
         }
 
@@ -747,7 +747,7 @@ void loop() {
                 drawRuntimeStatic(displayUnits);
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed, true);
-                drawRuntimeJobTime(getJobTimeSeconds(), true);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             } else if (overTempOverlayShown) {
                 // Still within on period — keep overlay fresh
@@ -794,7 +794,7 @@ void loop() {
         // Show the filter warning overlay for 4s every 10s until the timer is reset.
         static unsigned long filterFlashTimer   = 0;
         static bool          filterOverlayShown = false;
-        const unsigned long  FILTER_ON_MS       = 4000;
+        const unsigned long  FILTER_ON_MS       = 5000;
         const unsigned long  FILTER_OFF_MS      = 10000;
 
         bool filterCondition = (totalRuntimeTenths >= 100) &&
@@ -813,7 +813,7 @@ void loop() {
                 drawRuntimeStatic(displayUnits);
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed, true);
-                drawRuntimeJobTime(getJobTimeSeconds(), true);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             }
         } else if (filterOverlayShown) {
@@ -824,7 +824,7 @@ void loop() {
                 drawRuntimeStatic(displayUnits);
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed, true);
-                drawRuntimeJobTime(getJobTimeSeconds(), true);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             }
         }
@@ -836,7 +836,7 @@ void loop() {
             if (!anyOverlayShowing) {
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, false, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed);
-                drawRuntimeJobTime(getJobTimeSeconds());
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits);
             }
         }

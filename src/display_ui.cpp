@@ -852,7 +852,7 @@ void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining
       tft.setCursor(OX + (OW - (int)strlen(l1) * 18) / 2, botY + (botH / 2) - 12);
       tft.print(l1);
     } else if (idleState == IDLE_STATE_HOLD) {
-      const char* l1 = "TURN DIAL OR PRESS BUTTON";
+      const char* l1 = "TURN DIAL OR PULL TRIGGER";
       const char* l2 = "TO RESUME MOTOR";
       tft.setTextSize(3);
       int lineH = 28;
@@ -1298,13 +1298,11 @@ void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, 
   tft.setCursor(20, block2Y);
   tft.print("FILTER MAINTENANCE TIMER");
 
-  uint16_t fColor = lightThemeEnabled ? (uint16_t)TFT_NAVY : (uint16_t)TFT_CYAN;
-
   {
     uint32_t fHours  = totalRuntimeTenths / 10;
     uint8_t  fTenths = totalRuntimeTenths % 10;
-    // Cyan/blue while healthy, red when >= 10 hours (100 tenths)
-    uint16_t fColor  = (totalRuntimeTenths < 100) ? fColor : COLOR_ERROR;
+    // Green while healthy (< 10 hours), red when >= 10 hours (100 tenths)
+    uint16_t fColor  = (totalRuntimeTenths < 100) ? (uint16_t)COLOR_SUCCESS : (uint16_t)COLOR_ERROR;
     char buf[12];
     snprintf(buf, sizeof(buf), "%02lu:%02u", (unsigned long)(fHours % 100), fTenths * 6);
     tft.setFreeFont(&FreeSansBold18pt7b);
@@ -1402,7 +1400,7 @@ void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion
   // Assembled in USA
   tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
   tft.setTextSize(3);
-  const char* assembled = "Assembled in USA";
+  const char* assembled = "Manufactured in USA";
   tft.setCursor((SCREEN_WIDTH - (int)strlen(assembled) * 18) / 2, 198);
   tft.print(assembled);
 

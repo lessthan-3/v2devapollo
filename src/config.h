@@ -240,8 +240,8 @@
 #define COLOR_DEBUG             TFT_MAGENTA
 #define COLOR_OVERLAY_BG        TFT_BLACK
 #define COLOR_OVERLAY_BORDER    TFT_WHITE
-#define COLOR_MENU_SELECT       TFT_DARKGREY
-#define COLOR_MENU_EDIT         TFT_YELLOW
+#define COLOR_MENU_SELECT       TFT_YELLOW
+#define COLOR_MENU_EDIT         TFT_ORANGE
 
 // ============================================================================
 // Polling / Update Intervals (ms)
@@ -261,7 +261,7 @@
 //
 // To enable: add   -DSHOW_SET_PREVIEW   to build_flags in platformio.ini
 // or uncomment:
-#define SHOW_SET_PREVIEW 1
+#define SHOW_SET_PREVIEW 0
 
 // ============================================================================
 // Debug Flags

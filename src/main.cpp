@@ -76,6 +76,7 @@ const uint16_t powerPauseWarnSeconds = POWER_PAUSE_WARN_SEC;
 // About screen
 uint8_t     aboutIndex              = 0;
 int32_t     aboutScrollAccumulator  = 0;
+uint8_t     aboutPopupIndex         = 1;  // 0 = Reset, 1 = Return; default to safe option
 
 // Timers screen
 uint8_t     timersIndex             = 0;
@@ -203,18 +204,20 @@ void enterSupportContactScreen(void) {
 
 void enterTimersScreen(void) {
     currentScreen = SCREEN_TIMERS;
-    timersIndex = 0;
+    timersIndex = 2;  // Default to "Return" so accidental press is safe
     timersScrollAccumulator = 0;
-    encoder.setCount(0);
+    encoder.setCount(2);
     lastEncoderCount = encoder.getCount();
     drawTimersScreen(totalRuntimeTenths, totalJobTimeTenths, timersIndex);
 }
 
 void enterAboutScreen(void) {
     currentScreen = SCREEN_ABOUT;
+    aboutIndex = 0;
+    aboutScrollAccumulator = 0;
     encoder.setCount(0);
     lastEncoderCount = encoder.getCount();
-    drawAboutScreen(totalSystemTimeTenths, FIRMWARE_VERSION);
+    drawAboutScreen(totalSystemTimeTenths, FIRMWARE_VERSION, false);
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +506,41 @@ void loop() {
                 lastEncoderCount = encoder.getCount();
                 drawTimersScreen(totalRuntimeTenths, totalJobTimeTenths, timersIndex);
             }
+
+        } else if (currentScreen == SCREEN_ABOUT) {
+            bool popupVisible = (aboutIndex >= 50);
+            if (popupVisible) {
+                // Encoder navigates the two popup buttons
+                aboutScrollAccumulator += (int32_t)delta;
+                int32_t steps = 0;
+                while (aboutScrollAccumulator >= 2)  { steps++;  aboutScrollAccumulator -= 2; }
+                while (aboutScrollAccumulator <= -2) { steps--;  aboutScrollAccumulator += 2; }
+                if (steps != 0) {
+                    aboutPopupIndex = (uint8_t)constrain((int32_t)aboutPopupIndex + steps, 0, 1);
+                    encoder.setCount(aboutPopupIndex);
+                    lastEncoderCount = encoder.getCount();
+                    drawAboutResetPopup(aboutPopupIndex);
+                }
+            } else {
+                // Accumulate toward the 50-detent threshold
+                aboutScrollAccumulator += (int32_t)delta;
+                int32_t steps = 0;
+                while (aboutScrollAccumulator >= 2)  { steps++;  aboutScrollAccumulator -= 2; }
+                while (aboutScrollAccumulator <= -2) { steps--;  aboutScrollAccumulator += 2; }
+                if (steps != 0) {
+                    aboutIndex = (uint8_t)constrain((int32_t)aboutIndex + steps, 0, 100);
+                    encoder.setCount(aboutIndex);
+                    lastEncoderCount = encoder.getCount();
+                    if (aboutIndex >= 50) {
+                        // Threshold just crossed — draw about screen without footer then popup on top
+                        aboutPopupIndex = 1;  // default to safe 'Return' option
+                        drawAboutScreen(totalSystemTimeTenths, FIRMWARE_VERSION, true);
+                        drawAboutResetPopup(aboutPopupIndex);
+                        encoder.setCount(aboutPopupIndex);
+                        lastEncoderCount = encoder.getCount();
+                    }
+                }
+            }
         }
     }
 
@@ -587,7 +625,22 @@ void loop() {
                 }
 
             } else if (currentScreen == SCREEN_ABOUT) {
-                enterMenuScreen();
+                if (aboutIndex >= 50) {
+                    if (aboutPopupIndex == 0) {
+                        // Confirmed: reset system hours
+                        totalSystemTimeTenths = 0;
+                        saveSystemTimer();
+                    }
+                    // Either way, dismiss popup and reset secret counter
+                    aboutIndex = 0;
+                    aboutPopupIndex = 1;
+                    aboutScrollAccumulator = 0;
+                    encoder.setCount(0);
+                    lastEncoderCount = encoder.getCount();
+                    drawAboutScreen(totalSystemTimeTenths, FIRMWARE_VERSION, false);
+                } else {
+                    enterMenuScreen();
+                }
             }
         }
     }

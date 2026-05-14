@@ -29,7 +29,8 @@ void drawSupportFaqScreen(void);
 void drawSupportTechScreen(void);
 void drawSupportContactScreen(void);
 void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, uint8_t selectedOption);
-void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion);
+void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion, bool confirmVisible = false);
+void drawAboutResetPopup(uint8_t selectedOption);  // 0 = Reset, 1 = Return
 
 // Debug overlay preview carousel — compiled out unless DEBUG_OVERLAY_PREVIEW != 0
 #if DEBUG_OVERLAY_PREVIEW

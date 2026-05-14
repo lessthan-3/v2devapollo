@@ -54,10 +54,13 @@ void drawStartupScreen() {
   const int destW = SCREEN_HEIGHT;  // square source → square dest
   const int destX = (SCREEN_WIDTH - destW) / 2;
 
-  // The image is strictly two colours: logo pixels (any non-zero alpha) and background.
-  // Hardcode the logo colour as pure TFT_RED to guarantee correct output regardless
-  // of any encoding artefacts in the stored pixel data.
-  const uint16_t LOGO_COLOR = TFT_RED;
+  // Use white background to match the white backlight that is already on at power-up,
+  // eliminating the visible contrast flash before the display initialises.
+  const uint16_t SPLASH_BG    = TFT_WHITE;
+  const uint16_t LOGO_COLOR   = TFT_RED;
+
+  // Fill the entire screen first so the edges outside the centred image are white too
+  tft.fillScreen(SPLASH_BG);
 
   tft.startWrite();
   tft.setWindow(destX, 0, destX + destW - 1, destH - 1);
@@ -67,7 +70,7 @@ void drawStartupScreen() {
       int sx = (dx * SPLASH_IMAGE_WIDTH) / destW;
       int idx = sy * SPLASH_IMAGE_WIDTH + sx;
       uint8_t a = pgm_read_byte(&splashAlpha[idx]);
-      tft.pushColor(a ? LOGO_COLOR : COLOR_BG);
+      tft.pushColor(a ? LOGO_COLOR : SPLASH_BG);
     }
   }
   tft.endWrite();
@@ -1354,7 +1357,7 @@ void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, 
   drawOpt(opt2X, opt2W, 2, "Return");
 }
 
-void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion) {
+void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion, bool confirmVisible) {
   tft.fillScreen(COLOR_BG);
 
   // Title
@@ -1405,7 +1408,72 @@ void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion
   tft.print(assembled);
 
   // Footer
-  drawMenuFooter("Press to return to menu", COLOR_SUCCESS);
+  if (!confirmVisible) {
+    drawMenuFooter("Press to return to menu", COLOR_SUCCESS);
+  }
+  // When confirmVisible the popup is drawn separately via drawAboutResetPopup()
+}
+
+void drawAboutResetPopup(uint8_t selectedOption) {
+  // Popup geometry — centred on screen
+  const int PW = 380;
+  const int PH = 160;
+  const int PX = (SCREEN_WIDTH  - PW) / 2;
+  const int PY = (SCREEN_HEIGHT - PH) / 2;
+
+  // Shadow / border
+  tft.fillRect(PX - 2, PY - 2, PW + 4, PH + 4, COLOR_TEXT_SECONDARY);
+  tft.fillRect(PX, PY, PW, PH, COLOR_BG);
+  // Triple-width coloured border
+  for (int t = 0; t < 3; t++) {
+    tft.drawRect(PX + t, PY + t, PW - t * 2, PH - t * 2, (uint16_t)COLOR_ERROR);
+  }
+
+  // Title
+  tft.setFreeFont(nullptr);
+  tft.setTextSize(2);
+  tft.setTextColor((uint16_t)COLOR_ERROR, COLOR_BG);
+  const char* title = "RESET SYSTEM HOURS?";
+  int titleW = strlen(title) * 12;
+  tft.setCursor(PX + (PW - titleW) / 2, PY + 14);
+  tft.print(title);
+
+  // Divider inside popup
+  tft.drawFastHLine(PX + 8, PY + 36, PW - 16, (uint16_t)COLOR_TEXT_SECONDARY);
+
+  // Warning line
+  tft.setTextSize(2);
+  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+  const char* warn = "This cannot be undone.";
+  int warnW = strlen(warn) * 12;
+  tft.setCursor(PX + (PW - warnW) / 2, PY + 46);
+  tft.print(warn);
+
+  // Button row
+  const int btnY  = PY + PH - 48;
+  const int btnH  = 36;
+  const int btn0X = PX + 20;
+  const int btn0W = 150;
+  const int btn1X = PX + PW - 20 - 150;
+  const int btn1W = 150;
+
+  auto drawBtn = [&](int bx, int bw, uint8_t idx, const char* label, uint16_t hlColor) {
+    if (selectedOption == idx) {
+      tft.fillRect(bx, btnY, bw, btnH, hlColor);
+      tft.setTextColor(TFT_BLACK, hlColor);
+    } else {
+      tft.fillRect(bx, btnY, bw, btnH, COLOR_BG);
+      tft.drawRect(bx, btnY, bw, btnH, (uint16_t)COLOR_TEXT_SECONDARY);
+      tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+    }
+    tft.setTextSize(2);
+    int lw = strlen(label) * 12;
+    tft.setCursor(bx + (bw - lw) / 2, btnY + 10);
+    tft.print(label);
+  };
+
+  drawBtn(btn0X, btn0W, 0, "Reset",  (uint16_t)COLOR_ERROR);
+  drawBtn(btn1X, btn1W, 1, "Return", (uint16_t)COLOR_SUCCESS);
 }
 
 // ---------------------------------------------------------------------------

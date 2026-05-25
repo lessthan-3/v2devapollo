@@ -11,6 +11,7 @@
 #include "beeper.h"
 #include "storage.h"
 #include "job_timer.h"
+#include "ota_update.h"
 
 // ---------------------------------------------------------------------------
 // Hardware instances
@@ -31,7 +32,8 @@ typedef enum {
     SCREEN_SUPPORT_FAQ,
     SCREEN_SUPPORT_TECH,
     SCREEN_SUPPORT_CONTACT,
-    SCREEN_ABOUT
+    SCREEN_ABOUT,
+    SCREEN_OTA
 } ScreenState;
 
 // ---------------------------------------------------------------------------
@@ -220,6 +222,95 @@ void enterAboutScreen(void) {
     drawAboutScreen(totalSystemTimeTenths, FIRMWARE_VERSION, false);
 }
 
+void enterOtaScreen(void) {
+    currentScreen = SCREEN_OTA;
+    // Motor is already disabled when called from menu
+    otaStart();
+    encoder.setCount(0);
+    lastEncoderCount = encoder.getCount();
+    // Initial draw – task will be STARTING_AP immediately
+    drawOtaScreen(OTA_STATE_STARTING_AP, nullptr, 0, 0, true);
+}
+
+// ---------------------------------------------------------------------------
+// Startup rollback popup
+// Blocks in setup() until the user confirms or the 60-second timeout expires.
+// ---------------------------------------------------------------------------
+void handleRollbackPopupAtStartup(void)
+{
+    // Find the version string that was just flashed (it IS the running firmware)
+    const char *newVer = FIRMWARE_VERSION;
+
+    uint8_t       selOption   = 0;   // 0 = Confirm, 1 = Rollback
+    int64_t       lastEncCount = encoder.getCount();
+    unsigned long deadline    = millis() + (unsigned long)OTA_ROLLBACK_TIMEOUT_S * 1000UL;
+    unsigned long lastDraw    = 0;
+    bool          buttonWas   = false;
+
+    // Static flag so drawRollbackPopup resets its chrome on first call
+    // (it tracks its own static state so we just call it fresh)
+    tft.fillScreen(TFT_BLACK);
+    drawRollbackPopup(newVer, OTA_ROLLBACK_TIMEOUT_S, selOption);
+
+    while (millis() < deadline) {
+        // Update countdown every second
+        unsigned long now = millis();
+        uint32_t secsLeft = (uint32_t)((deadline - now) / 1000UL);
+
+        if (now - lastDraw >= 500UL) {
+            lastDraw = now;
+            drawRollbackPopup(newVer, secsLeft, selOption);
+        }
+
+        // Encoder navigation
+        int64_t enc = encoder.getCount();
+        if (enc != lastEncCount) {
+            int64_t delta = enc - lastEncCount;
+            lastEncCount  = enc;
+            // 2 raw ticks = 1 step
+            static int32_t acc = 0;
+            acc += (int32_t)delta;
+            int32_t steps = 0;
+            while (acc >= 2)  { steps++;  acc -= 2; }
+            while (acc <= -2) { steps--;  acc += 2; }
+            if (steps != 0) {
+                selOption = (uint8_t)constrain((int32_t)selOption + steps, 0, 1);
+                encoder.setCount(selOption);
+                lastEncCount = encoder.getCount();
+                drawRollbackPopup(newVer, secsLeft, selOption);
+            }
+        }
+
+        // Button (debounced)
+        bool buttonNow = (digitalRead(ENCODER_BTN) == LOW);
+        if (buttonNow != buttonWas) {
+            delay(30);
+            buttonNow = (digitalRead(ENCODER_BTN) == LOW);
+            if (buttonNow != buttonWas) {
+                buttonWas = buttonNow;
+                if (!buttonNow) {  // act on release
+                    if (selOption == 0) {
+                        // Confirm new firmware
+                        otaConfirmValid();
+                        Serial.println("[OTA] Rollback popup: user confirmed");
+                        return;
+                    } else {
+                        // User explicitly requested rollback
+                        Serial.println("[OTA] Rollback popup: user chose rollback");
+                        otaRollbackNow();  // does not return
+                    }
+                }
+            }
+        }
+
+        delay(20);
+    }
+
+    // Timeout — auto-rollback
+    Serial.println("[OTA] Rollback popup: timeout, rolling back");
+    otaRollbackNow();  // does not return
+}
+
 // ---------------------------------------------------------------------------
 // Settings sync helper
 // ---------------------------------------------------------------------------
@@ -243,6 +334,7 @@ void setup() {
     Serial.println("Apollo Sprayers HVLP - ESP32-S3");
     Serial.println("Initialising...");
 
+    otaInit();
     beeperInit();
 
     // Backlight on
@@ -317,6 +409,15 @@ void setup() {
 
     delay(2000);
     delay(1500);
+
+    // Check whether we just booted from a newly OTA-flashed partition.
+    // If so, present the 60-second confirmation popup before entering the app.
+    if (otaCheckRollback() == ROLLBACK_PENDING) {
+        Serial.println("[OTA] First boot after OTA – showing rollback popup");
+        handleRollbackPopupAtStartup();
+        // handleRollbackPopupAtStartup() either returns (confirmed) or reboots.
+    }
+
     enterRuntimeScreen();
     Serial.println("Entered runtime screen");
 }
@@ -554,7 +655,7 @@ void loop() {
         lastButtonChange = millis();
         lastButtonState  = buttonPressed;
 
-        if (!buttonPressed) {  // Act on release
+            if (!buttonPressed) {  // Act on release
             if (currentScreen == SCREEN_MENU) {
                 switch (menuIndex) {
                     case 0: enterRuntimeScreen();  break;
@@ -562,9 +663,8 @@ void loop() {
                     case 2: enterTimersScreen();   break;
                     case 3: enterSupportScreen();  break;
                     case 4: enterAboutScreen();    break;
-                }
-
-            } else if (currentScreen == SCREEN_RUNTIME) {
+                    case 5: enterOtaScreen();      break;
+                }            } else if (currentScreen == SCREEN_RUNTIME) {
                 if (overTempShutdown) {
                     // Hard shutdown — button does nothing, unit must be restarted
                     // (silently consume the press)
@@ -641,11 +741,69 @@ void loop() {
                 } else {
                     enterMenuScreen();
                 }
+
+            } else if (currentScreen == SCREEN_OTA) {
+                static uint8_t otaSelectedOption = 0;
+                OtaState st = otaStatus.state;
+
+                if (st == OTA_STATE_UPDATE_AVAILABLE) {
+                    if (otaSelectedOption == 0) {
+                        // User chose Install
+                        otaConfirmUpdate();
+                    } else {
+                        // User chose Cancel
+                        otaCancel();
+                    }
+                } else if (st == OTA_STATE_WAITING_CREDS ||
+                           st == OTA_STATE_STARTING_AP   ||
+                           st == OTA_STATE_CONNECTING_STA ||
+                           st == OTA_STATE_CHECKING_VERSION) {
+                    // Cancel during any pre-download phase
+                    otaCancel();
+                } else if (st == OTA_STATE_VERSION_CURRENT ||
+                           st == OTA_STATE_FAILED          ||
+                           st == OTA_STATE_CANCELLED) {
+                    // Return to menu
+                    otaCancel();  // ensure task cleans up
+                    otaInit();    // reset status
+                    enterMenuScreen();
+                }
+                // DOWNLOADING and SUCCESS: button has no effect
             }
         }
     }
 
     unsigned long now = millis();
+
+    // ------------------------------------------------------------------
+    // OTA screen refresh
+    // ------------------------------------------------------------------
+    if (currentScreen == SCREEN_OTA) {
+        static OtaState   lastDrawnState    = (OtaState)255;
+        static int        lastDrawnProgress = -1;
+        static uint8_t    otaSelectedOption = 0;
+
+        OtaState  curState    = otaStatus.state;
+        int       curProgress = otaStatus.downloadProgress;
+
+        bool needDraw = (curState != lastDrawnState) ||
+                        (curState == OTA_STATE_DOWNLOADING && curProgress != lastDrawnProgress);
+
+        if (needDraw) {
+            lastDrawnState    = curState;
+            lastDrawnProgress = curProgress;
+            const char* detail = nullptr;
+            if (curState == OTA_STATE_UPDATE_AVAILABLE) detail = otaStatus.latestVersion;
+            if (curState == OTA_STATE_FAILED)           detail = otaStatus.errorMessage;
+            drawOtaScreen(curState, detail, curProgress, otaSelectedOption, false);
+        }
+
+        // Auto-return when task signals CANCELLED
+        if (curState == OTA_STATE_CANCELLED) {
+            otaInit();
+            enterMenuScreen();
+        }
+    }
 
     // ------------------------------------------------------------------
     // Serial debug output

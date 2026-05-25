@@ -23,6 +23,9 @@ import struct, textwrap, pathlib, datetime
 QR_SPECS = [
     dict(varname="qrFaq",  url="https://hvlp.com/faq",                   size=200),
     dict(varname="qrTech", url="https://hvlp.com/technical-documents/",  size=200),
+    # OTA captive-portal QR: encodes a WiFi connection string for the "ApolloUpdate" open AP.
+    # iOS 11+ and Android 10+ recognise this format and offer to connect automatically.
+    dict(varname="qrOta",  url="WIFI:S:ApolloUpdate;T:nopass;;",          size=150),
 ]
 
 OUT_PATH = pathlib.Path(__file__).parent.parent / "src" / "qr_images.h"

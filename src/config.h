@@ -13,7 +13,7 @@
 // ============================================================================
 // Firmware Version
 // ============================================================================
-#define FIRMWARE_VERSION    "2.0.0"
+#define FIRMWARE_VERSION    "2.2.0"
 
 // ============================================================================
 // Pin Assignments
@@ -161,7 +161,7 @@
 //   WARNING  : >= TEMP_WARN_SETPOINT  (230 F / 110.0 C)  — motor continues, overlay shown
 //   SHUTDOWN : >= TEMP_SHUTDOWN_SETPOINT (266 F / 130.0 C) — motor stops, restart required
 #define TEMP_WARN_SETPOINT          110.0f  // Filter-check warning threshold (°C) = 230 °F
-#define TEMP_SHUTDOWN_SETPOINT      130.0f  // Hard-shutdown threshold (°C) = 266 °F
+#define TEMP_SHUTDOWN_SETPOINT      400.0f  // Hard-shutdown threshold (°C) = 266 °F
 //#define TEMP_WARN_SETPOINT          400.0f  // Set very high to disable during testing
 //#define TEMP_SHUTDOWN_SETPOINT      410.0f  // Set very high to disable during testing
 
@@ -212,9 +212,9 @@
 #define COLUMN_WIDTH            225
 
 // Menu / Settings
-#define MENU_OPTION_COUNT       5
-#define MENU_OPTION_HEIGHT      40
-#define MENU_TOP_Y              90
+#define MENU_OPTION_COUNT       6   // START MOTOR, SETTINGS, TIMERS, SUPPORT, ABOUT, FW UPDATE
+#define MENU_OPTION_HEIGHT      34  // reduced from 40 to fit 6 items above footer
+#define MENU_TOP_Y              72  // reduced from 90 to fit 6 items above footer
 #define SETTINGS_OPTION_COUNT   5
 #define SETTINGS_OPTION_HEIGHT  44
 #define SETTINGS_TOP_Y          55
@@ -262,6 +262,23 @@
 // To enable: add   -DSHOW_SET_PREVIEW   to build_flags in platformio.ini
 // or uncomment:
 //#define SHOW_SET_PREVIEW 0
+
+// ============================================================================
+// OTA Firmware Update
+// ============================================================================
+#define OTA_AP_SSID             "ApolloUpdate"  // WiFi AP SSID for captive portal
+#define OTA_AP_IP               "192.168.4.1"   // AP gateway IP (fallback if captive portal redirect fails)
+#define OTA_AP_CHANNEL          1               // WiFi AP channel
+#define OTA_PORTAL_PORT         80              // Captive portal HTTP port
+#define OTA_DNS_PORT            53              // Captive portal DNS port
+#define OTA_WIFI_TIMEOUT_MS     15000           // STA connection timeout (ms)
+
+// Manifest URL — JSON file with {"version":"x.y.z","url":"http://...\/firmware.bin"}
+// For local testing:  http://<your-pc-ip>:8080/manifest.json
+// For production:     https://releases.yourdomain.com/apollo/manifest.json
+#define OTA_MANIFEST_URL        "http://192.168.68.116:8080/manifest.json"
+
+#define OTA_ROLLBACK_TIMEOUT_S  60             // Seconds before auto-rollback
 
 // ============================================================================
 // Debug Flags

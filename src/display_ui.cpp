@@ -3,6 +3,7 @@
 #include "splash_image.h"
 #include "qr_images.h"
 #include "config.h"
+#include "ota_update.h"
 #include <math.h>
 #include <stdint.h>
 
@@ -197,6 +198,19 @@ static void drawIconClock(int cx, int cy, int r, uint16_t color) {
   tft.fillCircle(cx, cy, 2, color);
 }
 
+// ⬇  Download arrow icon – downward arrow with a horizontal base line
+static void drawIconDownload(int cx, int cy, int r, uint16_t color) {
+  // Vertical shaft
+  tft.fillRect(cx - 2, cy - r, 5, r, color);
+  // Arrowhead (filled triangle pointing down)
+  for (int row = 0; row <= r / 2; row++) {
+    int hw = row;
+    tft.drawFastHLine(cx - hw, cy + row - 2, hw * 2 + 1, color);
+  }
+  // Base line
+  tft.fillRect(cx - r + 2, cy + r / 2 + 2, (r - 2) * 2, 3, color);
+}
+
 // Draw the appropriate icon for a given menu index
 static void drawMenuIcon(uint8_t menuIdx, int cx, int cy, uint16_t color) {
   switch (menuIdx) {
@@ -205,6 +219,7 @@ static void drawMenuIcon(uint8_t menuIdx, int cx, int cy, uint16_t color) {
     case 2: drawIconClock(cx, cy, 13, color);    break;  // Timers
     case 3: drawIconQuestion(cx, cy, 13, color); break;  // Support
     case 4: drawIconInfo(cx, cy, 13, color);     break;  // About
+    case 5: drawIconDownload(cx, cy, 13, color); break;  // FW Update
     default: break;
   }
 }
@@ -234,26 +249,28 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
   const int textAreaX  = iconGutter;
   const int textAreaW  = SCREEN_WIDTH - iconGutter - 40;  // 40px right margin
 
-  const char* options[MENU_OPTION_COUNT] = {"START MOTOR", "SETTINGS", "TIMERS", "SUPPORT", "ABOUT"};
+  const char* options[MENU_OPTION_COUNT] = {
+    "START MOTOR", "SETTINGS", "TIMERS", "SUPPORT", "ABOUT", "FW UPDATE"
+  };
 
   for (uint8_t i = 0; i < MENU_OPTION_COUNT; i++) {
-    int y    = MENU_TOP_Y + (i * MENU_OPTION_HEIGHT);
-    int rowCy = y + (MENU_OPTION_HEIGHT / 2) - 5;  // icon vertical centre
+    int y     = MENU_TOP_Y + (i * MENU_OPTION_HEIGHT);
+    int rowCy = y + (MENU_OPTION_HEIGHT / 2) - 4;  // icon vertical centre
     bool selected = (i == menuIndex);
 
     // Row background
     if (selected) {
-      tft.fillRect(textAreaX, y - 5, SCREEN_WIDTH - textAreaX, MENU_OPTION_HEIGHT, COLOR_MENU_SELECT);
-      tft.fillRect(0, y - 5, textAreaX, MENU_OPTION_HEIGHT, COLOR_BG);
+      tft.fillRect(textAreaX, y - 4, SCREEN_WIDTH - textAreaX, MENU_OPTION_HEIGHT, COLOR_MENU_SELECT);
+      tft.fillRect(0, y - 4, textAreaX, MENU_OPTION_HEIGHT, COLOR_BG);
     } else {
-      tft.fillRect(0, y - 5, SCREEN_WIDTH, MENU_OPTION_HEIGHT, COLOR_BG);
+      tft.fillRect(0, y - 4, SCREEN_WIDTH, MENU_OPTION_HEIGHT, COLOR_BG);
     }
 
-    // Icon — always on black background
+    // Icon — always on background colour
     uint16_t iconColor = selected ? COLOR_TEXT_PRIMARY : COLOR_TEXT_SECONDARY;
     drawMenuIcon(i, 20, rowCy, iconColor);
 
-    // Text — built-in font size 3 (all caps, matches title), colour changes for selected row
+    // Text — built-in font size 3, colour changes for selected row
     uint16_t fg = selected ? TFT_BLACK : COLOR_TEXT_PRIMARY;
     uint16_t bg = selected ? COLOR_MENU_SELECT : COLOR_BG;
 
@@ -263,7 +280,7 @@ void drawMenuScreen(uint8_t menuIndex, bool forceRedraw) {
 
     int16_t tw = strlen(options[i]) * 18;  // 18px per char at size 3
     int tx = textAreaX + (textAreaW - tw) / 2;
-    int ty = y - 5 + (MENU_OPTION_HEIGHT - 24) / 2;  // 24px tall at size 3
+    int ty = y - 4 + (MENU_OPTION_HEIGHT - 24) / 2;  // 24px tall at size 3
     tft.setCursor(tx, ty);
     tft.print(options[i]);
   }
@@ -1546,3 +1563,517 @@ void drawDebugOverlayPreview(uint8_t stage) {
   }
 }
 #endif
+
+// ---------------------------------------------------------------------------
+// OTA Update screen
+//
+// Layout (480x320 landscape):
+//   Title bar  : y 0-48    "FIRMWARE UPDATE"
+//   Divider    : y 48
+//   Content    : y 48-278  (varies by state)
+//   Footer     : y 278-320 (instructions / progress bar label)
+//
+// WAITING_CREDS: QR code (left half) + text instructions (right half)
+// All other states: centred status text
+// ---------------------------------------------------------------------------
+
+void drawOtaScreen(OtaState state, const char* detail, int progress,
+                   uint8_t selectedOption, bool forceRedraw)
+{
+  static OtaState  lastState          = (OtaState)255;
+  static int       lastProgress       = -1;
+  static uint8_t   lastSelectedOption = 255;
+
+  bool stateChanged   = forceRedraw || (state != lastState);
+  bool progressChanged = (progress != lastProgress);
+  bool selChanged     = (selectedOption != lastSelectedOption);
+
+  if (!stateChanged && !progressChanged && !selChanged) return;
+
+  lastState          = state;
+  lastProgress       = progress;
+  lastSelectedOption = selectedOption;
+
+  if (stateChanged) {
+    tft.fillScreen(COLOR_BG);
+
+    // ---- Title bar ----
+    tft.setFreeFont(nullptr);
+    tft.setTextSize(3);
+    tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+    {
+      const char* title = "FIRMWARE UPDATE";
+      int tw = strlen(title) * 18;
+      tft.setCursor((SCREEN_WIDTH - tw) / 2, 10);
+      tft.print(title);
+    }
+    tft.drawFastHLine(0, 48, SCREEN_WIDTH, COLOR_TEXT_SECONDARY);
+  }
+
+  // ---- Content area (y 55 to 270) ----
+  const int CY  = 55;    // content top
+  const int CH  = 215;   // content height (excludes footer strip)
+  const int MCY = CY + CH / 2;  // vertical centre of content area
+
+  switch (state) {
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_STARTING_AP:
+    case OTA_STATE_WAITING_CREDS:
+      if (stateChanged) {
+        tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+
+        // Left panel: QR code (150x150) centred vertically
+        const int qrSize = 150;
+        const int qrX    = 10;
+        const int qrY    = CY + (CH - qrSize) / 2;
+        tft.pushImage(qrX, qrY, qrSize, qrSize, qrOta);
+
+        // Right panel: instructions
+        const int TX = 175;
+        tft.setFreeFont(nullptr);
+        tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+
+        tft.setTextSize(2);
+        tft.setCursor(TX, CY + 4);
+        tft.print("1. Scan QR code");
+        tft.setCursor(TX, CY + 26);
+        tft.print("   or connect to:");
+
+        tft.setTextSize(3);
+        tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+        tft.setCursor(TX, CY + 54);
+        tft.print(OTA_AP_SSID);
+
+        tft.setTextSize(2);
+        tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+        tft.setCursor(TX, CY + 90);
+        tft.print("2. Browser opens");
+        tft.setCursor(TX, CY + 110);
+        tft.print("   auto. If not:");
+
+        tft.setTextSize(2);
+        tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+        tft.setCursor(TX, CY + 132);
+        tft.print(OTA_AP_IP);
+
+        tft.setTextSize(2);
+        tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+        tft.setCursor(TX, CY + 156);
+        tft.print("3. Enter your home");
+        tft.setCursor(TX, CY + 176);
+        tft.print("   WiFi password");
+      }
+      break;
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_CONNECTING_STA:
+      if (stateChanged) {
+        tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+        tft.setFreeFont(nullptr);
+        tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+        tft.setTextSize(2);
+        {
+          const char* ln = "Connecting to WiFi...";
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, MCY - 10);
+          tft.print(ln);
+        }
+      }
+      break;
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_CHECKING_VERSION:
+      if (stateChanged) {
+        tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+        tft.setFreeFont(nullptr);
+        tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+        tft.setTextSize(2);
+        {
+          const char* ln = "Checking for updates...";
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, MCY - 10);
+          tft.print(ln);
+        }
+      }
+      break;
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_VERSION_CURRENT:
+      if (stateChanged) {
+        tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+        tft.setFreeFont(nullptr);
+
+        tft.setTextSize(3);
+        tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+        {
+          const char* ln = "Firmware up to date!";
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 18) / 2, MCY - 30);
+          tft.print(ln);
+        }
+
+        tft.setTextSize(2);
+        tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+        {
+          char ln[40];
+          snprintf(ln, sizeof(ln), "Current version: %s", FIRMWARE_VERSION);
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, MCY + 10);
+          tft.print(ln);
+        }
+      }
+      break;
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_UPDATE_AVAILABLE:
+      if (stateChanged || selChanged) {
+        if (stateChanged) {
+          tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+          tft.setFreeFont(nullptr);
+
+          tft.setTextSize(3);
+          tft.setTextColor(COLOR_WARNING, COLOR_BG);
+          {
+            const char* ln = "Update Available!";
+            tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 18) / 2, CY + 10);
+            tft.print(ln);
+          }
+
+          tft.setTextSize(2);
+          tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+          {
+            char ln[40];
+            snprintf(ln, sizeof(ln), "Installed:  %s", FIRMWARE_VERSION);
+            tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, CY + 52);
+            tft.print(ln);
+          }
+          {
+            char ln[40];
+            snprintf(ln, sizeof(ln), "Available:  %s", detail ? detail : "");
+            tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, CY + 74);
+            tft.print(ln);
+          }
+        }
+
+        // Two button options at the bottom of the content area
+        const int BTN_Y   = CY + 120;
+        const int BTN_H   = 40;
+        const int BTN_W   = 160;
+        const int BTN0_X  = (SCREEN_WIDTH / 2) - BTN_W - 10;
+        const int BTN1_X  = (SCREEN_WIDTH / 2) + 10;
+
+        // Install button
+        {
+          bool sel = (selectedOption == 0);
+          tft.fillRect(BTN0_X, BTN_Y, BTN_W, BTN_H,
+                       sel ? COLOR_SUCCESS : COLOR_BG);
+          tft.drawRect(BTN0_X, BTN_Y, BTN_W, BTN_H, COLOR_SUCCESS);
+          tft.setTextColor(sel ? TFT_BLACK : COLOR_SUCCESS, sel ? COLOR_SUCCESS : COLOR_BG);
+          tft.setTextSize(2);
+          const char* lbl = " INSTALL";
+          tft.setCursor(BTN0_X + (BTN_W - (int)strlen(lbl) * 12) / 2,
+                        BTN_Y + (BTN_H - 16) / 2);
+          tft.print(lbl);
+        }
+        // Cancel button
+        {
+          bool sel = (selectedOption == 1);
+          tft.fillRect(BTN1_X, BTN_Y, BTN_W, BTN_H,
+                       sel ? COLOR_TEXT_SECONDARY : COLOR_BG);
+          tft.drawRect(BTN1_X, BTN_Y, BTN_W, BTN_H, COLOR_TEXT_SECONDARY);
+          tft.setTextColor(sel ? TFT_BLACK : COLOR_TEXT_SECONDARY,
+                           sel ? COLOR_TEXT_SECONDARY : COLOR_BG);
+          tft.setTextSize(2);
+          const char* lbl = " CANCEL";
+          tft.setCursor(BTN1_X + (BTN_W - (int)strlen(lbl) * 12) / 2,
+                        BTN_Y + (BTN_H - 16) / 2);
+          tft.print(lbl);
+        }
+      }
+      break;
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_DOWNLOADING:
+      if (stateChanged) {
+        tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(3);
+        tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
+        {
+          const char* ln = "Downloading...";
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 18) / 2, MCY - 50);
+          tft.print(ln);
+        }
+        tft.setTextSize(2);
+        tft.setTextColor(COLOR_WARNING, COLOR_BG);
+        {
+          const char* ln = "Do not power off";
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, MCY + 40);
+          tft.print(ln);
+        }
+      }
+      // Progress bar (updated every loop call)
+      if (stateChanged || progressChanged) {
+        const int PBX = 40;
+        const int PBY = MCY - 16;
+        const int PBW = SCREEN_WIDTH - 80;
+        const int PBH = 24;
+
+        tft.drawRect(PBX, PBY, PBW, PBH, COLOR_TEXT_SECONDARY);
+        int filled = (int)((uint32_t)(PBW - 4) * (uint32_t)progress / 100);
+        tft.fillRect(PBX + 2, PBY + 2, filled,       PBH - 4, COLOR_SUCCESS);
+        tft.fillRect(PBX + 2 + filled, PBY + 2,
+                     PBW - 4 - filled, PBH - 4, COLOR_BG);
+
+        tft.setFreeFont(nullptr);
+        tft.setTextSize(2);
+        tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+        char pctStr[8];
+        snprintf(pctStr, sizeof(pctStr), "%3d%%", progress);
+        tft.setCursor((SCREEN_WIDTH - 4 * 12) / 2, PBY + PBH + 6);
+        tft.print(pctStr);
+      }
+      break;
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_SUCCESS:
+      if (stateChanged) {
+        tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+        tft.setFreeFont(nullptr);
+
+        tft.setTextSize(3);
+        tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+        {
+          const char* ln = "Update Complete!";
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 18) / 2, MCY - 30);
+          tft.print(ln);
+        }
+
+        tft.setTextSize(2);
+        tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+        {
+          const char* ln = "Rebooting in 3 seconds...";
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, MCY + 10);
+          tft.print(ln);
+        }
+      }
+      break;
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_FAILED:
+      if (stateChanged) {
+        tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+        tft.setFreeFont(nullptr);
+
+        tft.setTextSize(3);
+        tft.setTextColor(COLOR_ERROR, COLOR_BG);
+        {
+          const char* ln = "Update Failed";
+          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 18) / 2, MCY - 40);
+          tft.print(ln);
+        }
+
+        if (detail && detail[0]) {
+          tft.setTextSize(2);
+          tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+          // Wrap to two lines if too long
+          int len = (int)strlen(detail);
+          if (len * 12 <= SCREEN_WIDTH - 20) {
+            tft.setCursor((SCREEN_WIDTH - len * 12) / 2, MCY);
+            tft.print(detail);
+          } else {
+            // Split at the nearest space around the midpoint
+            char buf[96];
+            strlcpy(buf, detail, sizeof(buf));
+            int mid = len / 2;
+            int split = mid;
+            while (split > 0 && buf[split] != ' ') split--;
+            if (split == 0) split = mid;
+            buf[split] = '\0';
+            tft.setCursor(10, MCY - 4);
+            tft.print(buf);
+            tft.setCursor(10, MCY + 18);
+            tft.print(buf + split + 1);
+          }
+        }
+      }
+      break;
+
+    // ------------------------------------------------------------------
+    case OTA_STATE_CANCELLED:
+    default:
+      break;
+  }
+
+  // ---- Footer ----
+  if (stateChanged) {
+    tft.fillRect(0, 278, SCREEN_WIDTH, 42, COLOR_BG);
+    tft.drawFastHLine(0, 278, SCREEN_WIDTH, COLOR_TEXT_SECONDARY);
+    tft.setFreeFont(nullptr);
+
+    const char* footerText = nullptr;
+    uint16_t    footerColor = COLOR_TEXT_SECONDARY;
+
+    switch (state) {
+      case OTA_STATE_WAITING_CREDS:
+      case OTA_STATE_STARTING_AP:
+        footerText  = "Press button to cancel";
+        footerColor = COLOR_TEXT_SECONDARY;
+        break;
+      case OTA_STATE_VERSION_CURRENT:
+      case OTA_STATE_FAILED:
+      case OTA_STATE_CANCELLED:
+        footerText  = "Press button to return";
+        footerColor = COLOR_SUCCESS;
+        break;
+      case OTA_STATE_UPDATE_AVAILABLE:
+        footerText  = "Rotate to select, press to confirm";
+        footerColor = COLOR_TEXT_SECONDARY;
+        break;
+      case OTA_STATE_DOWNLOADING:
+      case OTA_STATE_SUCCESS:
+        footerText  = nullptr;
+        break;
+      default:
+        break;
+    }
+
+    if (footerText) {
+      int len = (int)strlen(footerText);
+      tft.setTextSize(2);
+      tft.setTextColor(footerColor, COLOR_BG);
+      tft.setCursor((SCREEN_WIDTH - len * 12) / 2, 286);
+      tft.print(footerText);
+    }
+  }
+
+  tft.setFreeFont(nullptr);
+  tft.setTextSize(1);
+}
+
+// ---------------------------------------------------------------------------
+// Rollback confirmation popup
+//
+// Shown at startup when a new firmware has not yet been validated.
+// Full-screen modal: red banner top, white content area with countdown.
+// ---------------------------------------------------------------------------
+void drawRollbackPopup(const char* newVersion, uint32_t secondsRemaining,
+                       uint8_t selectedOption)
+{
+  static uint32_t lastSeconds       = UINT32_MAX;
+  static uint8_t  lastSelectedOption = 255;
+  static bool     chromePainted      = false;
+
+  bool selChanged     = (selectedOption != lastSelectedOption);
+  bool timeChanged    = (secondsRemaining != lastSeconds);
+  bool needFullRepaint = !chromePainted || selChanged;
+
+  lastSeconds        = secondsRemaining;
+  lastSelectedOption = selectedOption;
+
+  const int OX = 20;
+  const int OY = 30;
+  const int OW = SCREEN_WIDTH  - OX * 2;   // 440
+  const int OH = SCREEN_HEIGHT - OY * 2;   // 260
+  const int bannerH = 90;
+
+  if (needFullRepaint) {
+    chromePainted = true;
+    tft.fillRect(OX, OY, OW, OH, TFT_BLACK);
+    for (int t = 0; t < 3; t++) {
+      tft.drawRect(OX + t, OY + t, OW - t * 2, OH - t * 2, COLOR_WARNING);
+    }
+
+    // ---- Orange/amber banner ----
+    tft.fillRect(OX + 3, OY + 3, OW - 6, bannerH - 3, COLOR_WARNING);
+    tft.setTextColor(TFT_BLACK, COLOR_WARNING);
+    tft.setFreeFont(nullptr);
+
+    tft.setTextSize(3);
+    {
+      const char* t1 = "NEW FIRMWARE";
+      tft.setCursor(OX + (OW - (int)strlen(t1) * 18) / 2, OY + 8);
+      tft.print(t1);
+    }
+    tft.setTextSize(2);
+    {
+      char t2[40];
+      snprintf(t2, sizeof(t2), "Version: %s", newVersion ? newVersion : "unknown");
+      tft.setCursor(OX + (OW - (int)strlen(t2) * 12) / 2, OY + 42);
+      tft.print(t2);
+    }
+    tft.setTextSize(2);
+    {
+      const char* t3 = "Confirm new firmware is working";
+      tft.setCursor(OX + (OW - (int)strlen(t3) * 12) / 2, OY + 64);
+      tft.print(t3);
+    }
+
+    // ---- White content area ----
+    int botY = OY + bannerH;
+    int botH = OH - bannerH;
+    tft.fillRect(OX + 3, botY, OW - 6, botH - 3, TFT_WHITE);
+
+    tft.setTextColor(TFT_BLACK, TFT_WHITE);
+    tft.setTextSize(2);
+    {
+      const char* l1 = "Press button to confirm.";
+      tft.setCursor(OX + (OW - (int)strlen(l1) * 12) / 2, botY + 10);
+      tft.print(l1);
+    }
+    {
+      const char* l2 = "Auto-rollback if not confirmed:";
+      tft.setCursor(OX + (OW - (int)strlen(l2) * 12) / 2, botY + 32);
+      tft.print(l2);
+    }
+
+    // ---- Two buttons: CONFIRM / ROLLBACK ----
+    const int BTN_Y  = botY + 65;
+    const int BTN_H  = 36;
+    const int BTN_W  = 150;
+    const int BTN0_X = OX + (OW / 2) - BTN_W - 8;
+    const int BTN1_X = OX + (OW / 2) + 8;
+
+    {
+      bool sel = (selectedOption == 0);
+      tft.fillRect(BTN0_X, BTN_Y, BTN_W, BTN_H,
+                   sel ? (uint16_t)TFT_DARKGREEN : (uint16_t)TFT_WHITE);
+      tft.drawRect(BTN0_X, BTN_Y, BTN_W, BTN_H, TFT_DARKGREEN);
+      tft.setTextColor(sel ? TFT_WHITE : TFT_DARKGREEN,
+                       sel ? (uint16_t)TFT_DARKGREEN : (uint16_t)TFT_WHITE);
+      tft.setTextSize(2);
+      const char* lbl = "CONFIRM";
+      tft.setCursor(BTN0_X + (BTN_W - (int)strlen(lbl) * 12) / 2,
+                    BTN_Y + (BTN_H - 16) / 2);
+      tft.print(lbl);
+    }
+    {
+      bool sel = (selectedOption == 1);
+      tft.fillRect(BTN1_X, BTN_Y, BTN_W, BTN_H,
+                   sel ? (uint16_t)TFT_RED : (uint16_t)TFT_WHITE);
+      tft.drawRect(BTN1_X, BTN_Y, BTN_W, BTN_H, TFT_RED);
+      tft.setTextColor(sel ? TFT_WHITE : TFT_RED,
+                       sel ? (uint16_t)TFT_RED : (uint16_t)TFT_WHITE);
+      tft.setTextSize(2);
+      const char* lbl = "ROLLBACK";
+      tft.setCursor(BTN1_X + (BTN_W - (int)strlen(lbl) * 12) / 2,
+                    BTN_Y + (BTN_H - 16) / 2);
+      tft.print(lbl);
+    }
+  }
+
+  // ---- Countdown timer (redrawn each second) ----
+  if (needFullRepaint || timeChanged) {
+    int botY = OY + bannerH;
+    int timeY = botY + 48;
+    // Erase only the countdown cell
+    tft.fillRect(OX + 3, timeY - 2, OW - 6, 20, TFT_WHITE);
+    tft.setFreeFont(nullptr);
+    tft.setTextColor(TFT_RED, TFT_WHITE);
+    tft.setTextSize(2);
+    char cntStr[16];
+    snprintf(cntStr, sizeof(cntStr), "%lus", (unsigned long)secondsRemaining);
+    tft.setCursor(OX + (OW - (int)strlen(cntStr) * 12) / 2, timeY);
+    tft.print(cntStr);
+  }
+
+  tft.setFreeFont(nullptr);
+  tft.setTextSize(1);
+}

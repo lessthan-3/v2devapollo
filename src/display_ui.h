@@ -32,6 +32,28 @@ void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, 
 void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion, bool confirmVisible = false);
 void drawAboutResetPopup(uint8_t selectedOption);  // 0 = Reset, 1 = Return
 
+// OTA Update screen
+#include "ota_update.h"
+/**
+ * @brief Draw the OTA status screen.
+ * @param state            Current OTA state.
+ * @param detail           Extra detail string (latest version, error, etc.).
+ * @param progress         Download progress 0-100 (used in DOWNLOADING state).
+ * @param selectedOption   0 = Install / Confirm, 1 = Cancel (UPDATE_AVAILABLE).
+ * @param forceRedraw      true = repaint even if state hasn't changed.
+ */
+void drawOtaScreen(OtaState state, const char* detail, int progress,
+                   uint8_t selectedOption = 0, bool forceRedraw = false);
+
+/**
+ * @brief Draw the first-boot rollback confirmation popup.
+ * @param newVersion       Version string of the newly flashed firmware.
+ * @param secondsRemaining Seconds until auto-rollback.
+ * @param selectedOption   0 = Confirm, 1 = Rollback (encoder selection).
+ */
+void drawRollbackPopup(const char* newVersion, uint32_t secondsRemaining,
+                       uint8_t selectedOption);
+
 // Debug overlay preview carousel — compiled out unless DEBUG_OVERLAY_PREVIEW != 0
 #if DEBUG_OVERLAY_PREVIEW
 void drawDebugOverlayPreview(uint8_t stage);

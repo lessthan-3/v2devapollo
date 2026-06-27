@@ -13,7 +13,7 @@
 // ============================================================================
 // Firmware Version
 // ============================================================================
-#define FIRMWARE_VERSION    "2.2.0"
+#define FIRMWARE_VERSION    "2.4.0"
 
 // ============================================================================
 // Pin Assignments
@@ -150,6 +150,9 @@
 // at the 3 PSI floor value since IDLE_TARGET_PSI is below 3 PSI.
 #define IDLE_HOLD_STABLE_SECONDS    1       // Seconds stable at idle speed before entering HOLD
 #define IDLE_HOLD_SPIKE_UNITS       10.0f   // Spike threshold during HOLD (matches 3 PSI entry floor)
+#define IDLE_RAMP_TIMEOUT_SECONDS   8       // Max seconds in PID ramp phase before forcing to HOLD
+#define IDLE_RAMP_LOCKOUT_SECONDS   1       // Lockout: no exit check for first N seconds of ramp
+#define IDLE_RAMP_SPIKE_UNITS       50.0f  // Speed above (bufMin+bufMax)/2 of recent window that signals a load event
 
 // ============================================================================
 // Temperature Sensor
@@ -179,7 +182,7 @@
 // 100% = POWER_PAUSE_PCT_BASE seconds; three fixed steps: 100%, 125%, 150%
 // ============================================================================
 #define POWER_PAUSE_PCT_BASE    60      // Seconds corresponding to 100%
-#define POWER_PAUSE_SEC_MIN     60      // 100% (minimum / default)
+#define POWER_PAUSE_SEC_MIN     15      // 100% (minimum / default)
 #define POWER_PAUSE_SEC_MAX     90      // 150% (maximum)
 #define POWER_PAUSE_SEC_STEP    15      // Encoder step: 15 s = 25% per detent
 #define POWER_PAUSE_WARN_SEC    10      // Fixed warning countdown (seconds)
@@ -187,6 +190,18 @@
 // Idle entry deviation tuning bounds
 #define IDLE_DEV_MIN            0.05f
 #define IDLE_DEV_MAX            2.0f
+
+// Secret menu — Power Pause Sensitivity multiplier (applied to spike threshold)
+// Stored as integer percentage; 100 = 1.0x (default, no change to threshold)
+// Lower % → smaller threshold → more sensitive (exits PP sooner)
+// Higher % → larger threshold → less sensitive (stays in PP longer)
+#define PP_SENSITIVITY_DEFAULT  100     // 100% = 1.0x multiplier
+#define PP_SENSITIVITY_MIN      10      // 10% = 0.1x multiplier (most sensitive)
+#define PP_SENSITIVITY_MAX      300     // 300% = 3.0x multiplier (least sensitive)
+#define PP_SENSITIVITY_STEP     10      // 10% per encoder detent
+
+// Secret menu — max user-settable system hours
+#define SECRET_HOURS_MAX        9999    // Maximum hours that can be entered via secret menu
 
 // ============================================================================
 // Display Layout (480x320 landscape, ST7796)
@@ -276,7 +291,12 @@
 // Manifest URL — JSON file with {"version":"x.y.z","url":"http://...\/firmware.bin"}
 // For local testing:  http://<your-pc-ip>:8080/manifest.json
 // For production:     https://releases.yourdomain.com/apollo/manifest.json
-#define OTA_MANIFEST_URL        "http://192.168.68.116:8080/manifest.json"
+#define OTA_MANIFEST_URL        "http://18.191.98.191:8080/manifest.json"
+
+// Remote telemetry log endpoint (log_server.py running on the same EC2 instance)
+// Set OTA_LOG_API_KEY to the same value as API_KEY in apollo-logserver.service
+#define OTA_LOG_URL             "http://18.191.98.191:8081/log"
+#define OTA_LOG_API_KEY         "apollo-secret-key"   // ← change before production
 
 #define OTA_ROLLBACK_TIMEOUT_S  60             // Seconds before auto-rollback
 

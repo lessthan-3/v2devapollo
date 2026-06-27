@@ -33,7 +33,10 @@ typedef enum {
     SCREEN_SUPPORT_TECH,
     SCREEN_SUPPORT_CONTACT,
     SCREEN_ABOUT,
-    SCREEN_OTA
+    SCREEN_OTA,
+    SCREEN_SECRET_MENU,
+    SCREEN_SECRET_SET_HOURS,
+    SCREEN_SECRET_PP_SENSITIVITY
 } ScreenState;
 
 // ---------------------------------------------------------------------------
@@ -49,6 +52,14 @@ uint16_t    powerPauseSeconds       = IDLE_ENTRY_SECONDS;
 bool        powerPauseBeeperEnabled = true;
 DisplayUnits displayUnits           = UNITS_IMPERIAL;
 bool        lightThemeEnabled       = false;
+
+// Power-pause sensitivity (secret menu) — stored as integer percentage 10-300
+uint16_t    powerPauseSensitivityPct = PP_SENSITIVITY_DEFAULT;
+
+// Motor test mode — tracks active test so PSI can be restored on exit
+bool          motorTestActive        = false;
+float         preMotorTestTargetPsi  = 0.0f;
+unsigned long motorTestStartTime     = 0;
 
 // Runtime target pressure
 float       targetPsi               = TARGET_PSI_DEFAULT;
@@ -80,9 +91,21 @@ uint8_t     aboutIndex              = 0;
 int32_t     aboutScrollAccumulator  = 0;
 uint8_t     aboutPopupIndex         = 1;  // 0 = Reset, 1 = Return; default to safe option
 
+// Secret menu
+uint8_t     secretMenuIndex         = 0;
+int32_t     secretMenuScrollAccum   = 0;
+uint32_t    secretEditHours         = 0;     // hours being edited on Set Hours screen
+int32_t     secretHoursScrollAccum  = 0;
+uint16_t    secretSensitivityPct    = PP_SENSITIVITY_DEFAULT;
+int32_t     secretSensScrollAccum   = 0;
+
 // Timers screen
 uint8_t     timersIndex             = 0;
 int32_t     timersScrollAccumulator = 0;
+
+// OTA screen
+uint8_t     otaSelectedOption       = 0;
+int32_t     otaScrollAccumulator    = 0;
 
 // Support submenu
 uint8_t     supportMenuIndex        = 0;
@@ -103,6 +126,9 @@ void enterSupportTechScreen(void);
 void enterSupportContactScreen(void);
 void enterTimersScreen(void);
 void enterAboutScreen(void);
+void enterSecretMenu(void);
+void enterSecretSetHours(void);
+void enterSecretSensitivity(void);
 void syncPowerPauseSettings(bool saveToNvs);
 
 // ---------------------------------------------------------------------------
@@ -112,6 +138,14 @@ void syncPowerPauseSettings(bool saveToNvs);
 void enterMenuScreen(void) {
     currentScreen = SCREEN_MENU;
     setMotorEnabledSafe(false);
+
+    // Restore target PSI if returning from a motor test so that
+    // "Start Motor" resumes at the user's original pressure setpoint.
+    if (motorTestActive) {
+        motorTestActive = false;
+        targetPsi = preMotorTestTargetPsi;
+    }
+
     menuIndex = 0;
     menuScrollAccumulator = 0;
     encoder.setCount(menuIndex);
@@ -222,8 +256,37 @@ void enterAboutScreen(void) {
     drawAboutScreen(totalSystemTimeTenths, FIRMWARE_VERSION, false);
 }
 
+void enterSecretMenu(void) {
+    currentScreen = SCREEN_SECRET_MENU;
+    secretMenuIndex = 0;
+    secretMenuScrollAccum = 0;
+    encoder.setCount(0);
+    lastEncoderCount = encoder.getCount();
+    drawSecretMenu(secretMenuIndex, true);
+}
+
+void enterSecretSetHours(void) {
+    currentScreen = SCREEN_SECRET_SET_HOURS;
+    secretEditHours = totalSystemTimeTenths / 10;  // convert tenths to whole hours
+    secretHoursScrollAccum = 0;
+    encoder.setCount((int64_t)secretEditHours);
+    lastEncoderCount = encoder.getCount();
+    drawSecretSetHoursScreen(secretEditHours, true);
+}
+
+void enterSecretSensitivity(void) {
+    currentScreen = SCREEN_SECRET_PP_SENSITIVITY;
+    secretSensitivityPct = powerPauseSensitivityPct;
+    secretSensScrollAccum = 0;
+    encoder.setCount((int64_t)(secretSensitivityPct / PP_SENSITIVITY_STEP));
+    lastEncoderCount = encoder.getCount();
+    drawSecretSensitivityScreen(secretSensitivityPct, true);
+}
+
 void enterOtaScreen(void) {
     currentScreen = SCREEN_OTA;
+    otaSelectedOption    = 0;
+    otaScrollAccumulator = 0;
     // Motor is already disabled when called from menu
     otaStart();
     encoder.setCount(0);
@@ -242,7 +305,10 @@ void handleRollbackPopupAtStartup(void)
     const char *newVer = FIRMWARE_VERSION;
 
     uint8_t       selOption   = 0;   // 0 = Confirm, 1 = Rollback
-    int64_t       lastEncCount = encoder.getCount();
+    // Reset encoder to a known position so the popup navigation is reliable
+    // regardless of what encoder value was left over from the boot sequence.
+    encoder.setCount(0);
+    int64_t       lastEncCount = 0;
     unsigned long deadline    = millis() + (unsigned long)OTA_ROLLBACK_TIMEOUT_S * 1000UL;
     unsigned long lastDraw    = 0;
     bool          buttonWas   = false;
@@ -609,37 +675,75 @@ void loop() {
             }
 
         } else if (currentScreen == SCREEN_ABOUT) {
-            bool popupVisible = (aboutIndex >= 50);
-            if (popupVisible) {
-                // Encoder navigates the two popup buttons
-                aboutScrollAccumulator += (int32_t)delta;
-                int32_t steps = 0;
-                while (aboutScrollAccumulator >= 2)  { steps++;  aboutScrollAccumulator -= 2; }
-                while (aboutScrollAccumulator <= -2) { steps--;  aboutScrollAccumulator += 2; }
-                if (steps != 0) {
-                    aboutPopupIndex = (uint8_t)constrain((int32_t)aboutPopupIndex + steps, 0, 1);
-                    encoder.setCount(aboutPopupIndex);
-                    lastEncoderCount = encoder.getCount();
-                    drawAboutResetPopup(aboutPopupIndex);
+            // Accumulate toward the 50-detent threshold that opens the secret menu
+            aboutScrollAccumulator += (int32_t)delta;
+            int32_t steps = 0;
+            while (aboutScrollAccumulator >= 2)  { steps++;  aboutScrollAccumulator -= 2; }
+            while (aboutScrollAccumulator <= -2) { steps--;  aboutScrollAccumulator += 2; }
+            if (steps != 0) {
+                aboutIndex = (uint8_t)constrain((int32_t)aboutIndex + steps, 0, 100);
+                encoder.setCount(aboutIndex);
+                lastEncoderCount = encoder.getCount();
+                if (aboutIndex >= 50) {
+                    // Threshold crossed — enter secret menu
+                    aboutIndex = 0;
+                    aboutScrollAccumulator = 0;
+                    enterSecretMenu();
                 }
-            } else {
-                // Accumulate toward the 50-detent threshold
-                aboutScrollAccumulator += (int32_t)delta;
+            }
+
+        } else if (currentScreen == SCREEN_SECRET_MENU) {
+            secretMenuScrollAccum += (int32_t)delta;
+            int32_t steps = 0;
+            while (secretMenuScrollAccum >= 2)  { steps++;  secretMenuScrollAccum -= 2; }
+            while (secretMenuScrollAccum <= -2) { steps--;  secretMenuScrollAccum += 2; }
+            if (steps != 0) {
+                secretMenuIndex = (uint8_t)constrain((int32_t)secretMenuIndex + steps, 0, 3);
+                encoder.setCount(secretMenuIndex);
+                lastEncoderCount = encoder.getCount();
+                drawSecretMenu(secretMenuIndex);
+            }
+
+        } else if (currentScreen == SCREEN_SECRET_SET_HOURS) {
+            secretHoursScrollAccum += (int32_t)delta;
+            int32_t steps = 0;
+            while (secretHoursScrollAccum >= 2)  { steps++;  secretHoursScrollAccum -= 2; }
+            while (secretHoursScrollAccum <= -2) { steps--;  secretHoursScrollAccum += 2; }
+            if (steps != 0) {
+                int32_t newHours = (int32_t)secretEditHours + steps;
+                secretEditHours = (uint32_t)constrain(newHours, 0, (int32_t)SECRET_HOURS_MAX);
+                encoder.setCount((int64_t)secretEditHours);
+                lastEncoderCount = encoder.getCount();
+                drawSecretSetHoursScreen(secretEditHours);
+            }
+
+        } else if (currentScreen == SCREEN_SECRET_PP_SENSITIVITY) {
+            secretSensScrollAccum += (int32_t)delta;
+            int32_t steps = 0;
+            while (secretSensScrollAccum >= 2)  { steps++;  secretSensScrollAccum -= 2; }
+            while (secretSensScrollAccum <= -2) { steps--;  secretSensScrollAccum += 2; }
+            if (steps != 0) {
+                int32_t newPct = (int32_t)secretSensitivityPct + steps * PP_SENSITIVITY_STEP;
+                secretSensitivityPct = (uint16_t)constrain(newPct,
+                                                            PP_SENSITIVITY_MIN,
+                                                            PP_SENSITIVITY_MAX);
+                encoder.setCount((int64_t)(secretSensitivityPct / PP_SENSITIVITY_STEP));
+                lastEncoderCount = encoder.getCount();
+                drawSecretSensitivityScreen(secretSensitivityPct);
+            }
+        } else if (currentScreen == SCREEN_OTA) {
+            // UPDATE_AVAILABLE and VERSION_CURRENT both have selectable button pairs
+            if (otaStatus.state == OTA_STATE_UPDATE_AVAILABLE ||
+                otaStatus.state == OTA_STATE_VERSION_CURRENT) {
+                otaScrollAccumulator += (int32_t)delta;
                 int32_t steps = 0;
-                while (aboutScrollAccumulator >= 2)  { steps++;  aboutScrollAccumulator -= 2; }
-                while (aboutScrollAccumulator <= -2) { steps--;  aboutScrollAccumulator += 2; }
+                while (otaScrollAccumulator >= 2)  { steps++;  otaScrollAccumulator -= 2; }
+                while (otaScrollAccumulator <= -2) { steps--;  otaScrollAccumulator += 2; }
                 if (steps != 0) {
-                    aboutIndex = (uint8_t)constrain((int32_t)aboutIndex + steps, 0, 100);
-                    encoder.setCount(aboutIndex);
+                    otaSelectedOption = (uint8_t)constrain((int32_t)otaSelectedOption + steps, 0, 1);
+                    encoder.setCount(otaSelectedOption);
                     lastEncoderCount = encoder.getCount();
-                    if (aboutIndex >= 50) {
-                        // Threshold just crossed — draw about screen without footer then popup on top
-                        aboutPopupIndex = 1;  // default to safe 'Return' option
-                        drawAboutScreen(totalSystemTimeTenths, FIRMWARE_VERSION, true);
-                        drawAboutResetPopup(aboutPopupIndex);
-                        encoder.setCount(aboutPopupIndex);
-                        lastEncoderCount = encoder.getCount();
-                    }
+                    drawOtaScreen(otaStatus.state, otaStatus.latestVersion, 0, otaSelectedOption, false);
                 }
             }
         }
@@ -725,25 +829,44 @@ void loop() {
                 }
 
             } else if (currentScreen == SCREEN_ABOUT) {
-                if (aboutIndex >= 50) {
-                    if (aboutPopupIndex == 0) {
-                        // Confirmed: reset system hours
-                        totalSystemTimeTenths = 0;
-                        saveSystemTimer();
-                    }
-                    // Either way, dismiss popup and reset secret counter
-                    aboutIndex = 0;
-                    aboutPopupIndex = 1;
-                    aboutScrollAccumulator = 0;
-                    encoder.setCount(0);
-                    lastEncoderCount = encoder.getCount();
-                    drawAboutScreen(totalSystemTimeTenths, FIRMWARE_VERSION, false);
-                } else {
-                    enterMenuScreen();
+                // No popup anymore — button just returns to menu
+                enterMenuScreen();
+
+            } else if (currentScreen == SCREEN_SECRET_MENU) {
+                switch (secretMenuIndex) {
+                    case 0:  // Set System Hours
+                        enterSecretSetHours();
+                        break;
+                    case 1:  // PP Sensitivity
+                        enterSecretSensitivity();
+                        break;
+                    case 2:  // Motor Test — enter runtime at MAX pressure
+                        preMotorTestTargetPsi = targetPsi;  // save current setpoint for restore on exit
+                        motorTestActive       = true;
+                        motorTestStartTime    = millis();
+                        targetPsi             = MAX_PSI_THRESHOLD;
+                        enterRuntimeScreen();
+                        break;
+                    case 3:  // Return to About
+                    default:
+                        enterAboutScreen();
+                        break;
                 }
 
+            } else if (currentScreen == SCREEN_SECRET_SET_HOURS) {
+                // Save the manually-entered hours
+                totalSystemTimeTenths = (uint32_t)secretEditHours * 10;
+                saveSystemTimer();
+                enterSecretMenu();
+
+            } else if (currentScreen == SCREEN_SECRET_PP_SENSITIVITY) {
+                // Save the sensitivity multiplier
+                powerPauseSensitivityPct = secretSensitivityPct;
+                setSpikeMultiplierSafe(powerPauseSensitivityPct / 100.0f);
+                saveSettings();
+                enterSecretMenu();
+
             } else if (currentScreen == SCREEN_OTA) {
-                static uint8_t otaSelectedOption = 0;
                 OtaState st = otaStatus.state;
 
                 if (st == OTA_STATE_UPDATE_AVAILABLE) {
@@ -760,8 +883,17 @@ void loop() {
                            st == OTA_STATE_CHECKING_VERSION) {
                     // Cancel during any pre-download phase
                     otaCancel();
-                } else if (st == OTA_STATE_VERSION_CURRENT ||
-                           st == OTA_STATE_FAILED          ||
+                } else if (st == OTA_STATE_VERSION_CURRENT) {
+                    if (otaSelectedOption == 0) {
+                        // RETURN — cancel and go back to menu
+                        otaCancel();
+                        otaInit();
+                        enterMenuScreen();
+                    } else {
+                        // REINSTALL — force download of current version
+                        otaStatus.forceInstallRequested = true;
+                    }
+                } else if (st == OTA_STATE_FAILED ||
                            st == OTA_STATE_CANCELLED) {
                     // Return to menu
                     otaCancel();  // ensure task cleans up
@@ -781,7 +913,6 @@ void loop() {
     if (currentScreen == SCREEN_OTA) {
         static OtaState   lastDrawnState    = (OtaState)255;
         static int        lastDrawnProgress = -1;
-        static uint8_t    otaSelectedOption = 0;
 
         OtaState  curState    = otaStatus.state;
         int       curProgress = otaStatus.downloadProgress;
@@ -881,6 +1012,7 @@ void loop() {
     if (currentScreen == SCREEN_RUNTIME) {
         static IdleState lastIdleState      = IDLE_STATE_OFF;
         static uint32_t  idleHoldEntryTime  = 0;
+        bool             forceOverlayDraw   = false;  // set true when entering a new idle state
 
         // Track idle state transitions for job timer and overlay
         if (idleState != lastIdleState) {
@@ -908,6 +1040,14 @@ void loop() {
                 drawRuntimeMotorPower(displaySpeed, true);
                 drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
+            }
+            // If we're transitioning INTO an idle state, force the overlay to
+            // repaint even if its own static lastState hasn't changed.  This
+            // can happen when the ramp is exited early (load-spike exit) and
+            // then re-entered: the base screen was restored without going
+            // through the overlay function, so its internal state is stale.
+            if (idleState != IDLE_STATE_OFF) {
+                forceOverlayDraw = true;
             }
             lastOverlayState = idleState;
         } else if (overTempTransition && !overTempActive) {
@@ -981,7 +1121,17 @@ void loop() {
                 uint32_t maxIdleTime  = 900;  // 15 minutes
                 timeoutRemaining = (idleDuration < maxIdleTime) ? (maxIdleTime - idleDuration) : 0;
             }
-            drawRuntimePowerPauseOverlay(idleState, timeoutRemaining, false);
+            drawRuntimePowerPauseOverlay(idleState, timeoutRemaining, forceOverlayDraw);
+        }
+
+        // Motor test 30-second auto shutoff
+        if (motorTestActive && (millis() - motorTestStartTime >= 30000UL)) {
+            Serial.println("Motor test timeout — returning to menu");
+            pauseJobTimer();
+            setMotorEnabledSafe(false);
+            requestPidReset();
+            enterMenuScreen();  // clears motorTestActive and restores targetPsi
+            return;
         }
 
         // Power pause hard timeout (15 minutes) -> return to menu

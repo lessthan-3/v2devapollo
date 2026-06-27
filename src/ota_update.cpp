@@ -24,6 +24,8 @@
 
 #include "ota_update.h"
 #include "config.h"
+#include "dual_core_motor.h"
+#include "remote_log.h"
 
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -371,6 +373,9 @@ static void otaTask(void *param)
     }
     Serial.printf("[OTA] WiFi connected: IP=%s\n", WiFi.localIP().toString().c_str());
 
+    // ---- Phase 3.5: Send remote telemetry log (fire-and-forget) ----
+    sendRemoteLog("ota_connect");
+
     // ---- Phase 4: Fetch manifest ----
     otaStatus.state = OTA_STATE_CHECKING_VERSION;
     if (!fetchManifest()) {
@@ -378,7 +383,14 @@ static void otaTask(void *param)
     }
 
     if (otaStatus.state == OTA_STATE_VERSION_CURRENT) {
-        goto cleanup;
+        // Don't immediately exit — wait for the user to choose Return or Reinstall.
+        while (!otaStatus.cancelRequested && !otaStatus.forceInstallRequested) {
+            vTaskDelay(50 / portTICK_PERIOD_MS);
+        }
+        if (otaStatus.cancelRequested) goto cleanup;
+        // User requested force-reinstall: proceed with download of current version.
+        otaStatus.state         = OTA_STATE_UPDATE_AVAILABLE;
+        otaStatus.updateConfirmed = true;
     }
 
     // ---- Phase 5: Wait for user confirmation ----
@@ -392,9 +404,15 @@ static void otaTask(void *param)
     }
 
     // ---- Phase 6: Download and flash ----
+    // Suspend the motor task so Core 0 is fully available to the WiFi stack.
+    // Motor is already disabled (speed=0) at this point.
     otaStatus.state = OTA_STATE_DOWNLOADING;
-    if (!downloadAndFlash()) {
-        goto cleanup;
+    {
+        TaskHandle_t motorTask = getMotorTaskHandle();
+        if (motorTask) vTaskSuspend(motorTask);
+        bool flashOk = downloadAndFlash();
+        if (motorTask) vTaskResume(motorTask);
+        if (!flashOk) goto cleanup;
     }
 
     // ---- Phase 7: Set rollback flag and reboot ----
@@ -405,10 +423,21 @@ static void otaTask(void *param)
     esp_restart();
 
 cleanup:
+    WiFi.softAPdisconnect(true);          // Explicitly tear down the AP first
+    vTaskDelay(200 / portTICK_PERIOD_MS);
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
+    vTaskDelay(1000 / portTICK_PERIOD_MS); // Block until WiFi stack fully unloads
+                                           // before s_otaTaskHandle is cleared.
+                                           // Without this, a rapid otaStart() re-entry
+                                           // races esp_wifi_init() against the async
+                                           // teardown and fails with ESP_ERR_WIFI_INIT_STATE.
 
-    if (!otaStatus.cancelRequested && otaStatus.state != OTA_STATE_FAILED &&
+    // Set CANCELLED unless we ended in a more specific terminal state
+    // (FAILED or VERSION_CURRENT should be shown to the user as-is).
+    // Note: cancelRequested being true does NOT prevent CANCELLED — it is
+    // precisely why we arrive here when the user presses the cancel button.
+    if (otaStatus.state != OTA_STATE_FAILED &&
         otaStatus.state != OTA_STATE_VERSION_CURRENT) {
         otaStatus.state = OTA_STATE_CANCELLED;
     }

@@ -538,15 +538,7 @@ void drawRuntimeTarget(float target, float current, DisplayUnits units, bool val
     // ---- Sprite path: render off-screen then blit atomically (no flicker) ----
     pressSprite.fillSprite(COLOR_BG);
 
-    if (target >= MAX_PSI_THRESHOLD) {
-      pressSprite.setFreeFont(&FreeSansBold24pt7b);
-      pressSprite.setTextSize(2);
-      pressSprite.setTextColor(color, COLOR_BG);
-      int16_t w = pressSprite.textWidth("MAX");
-      int16_t h = pressSprite.fontHeight();
-      pressSprite.setCursor((SCREEN_WIDTH - w) / 2, (zoneH + h) / 2 - 15);
-      pressSprite.print("MAX");
-    } else {
+    {
       char numStr[8], unitStr[8];
       buildStrings(numStr, sizeof(numStr), unitStr, sizeof(unitStr));
 
@@ -580,15 +572,7 @@ void drawRuntimeTarget(float target, float current, DisplayUnits units, bool val
     // ---- Fallback: direct draw (visible flicker, used only if sprite alloc failed) ----
     tft.fillRect(0, 0, SCREEN_WIDTH, zoneH, COLOR_BG);
 
-    if (target >= MAX_PSI_THRESHOLD) {
-      tft.setFreeFont(&FreeSansBold24pt7b);
-      tft.setTextSize(2);
-      tft.setTextColor(color, COLOR_BG);
-      int16_t w = tft.textWidth("MAX");
-      int16_t h = tft.fontHeight();
-      tft.setCursor((SCREEN_WIDTH - w) / 2, (zoneH + h) / 2 - 15);
-      tft.print("MAX");
-    } else {
+    {
       char numStr[8], unitStr[8];
       buildStrings(numStr, sizeof(numStr), unitStr, sizeof(unitStr));
 
@@ -1428,69 +1412,131 @@ void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion
   if (!confirmVisible) {
     drawMenuFooter("Press to return to menu", COLOR_SUCCESS);
   }
-  // When confirmVisible the popup is drawn separately via drawAboutResetPopup()
+  // When confirmVisible the secret menu is drawn separately via drawSecretMenu()
 }
 
-void drawAboutResetPopup(uint8_t selectedOption) {
-  // Popup geometry — centred on screen
-  const int PW = 380;
-  const int PH = 160;
-  const int PX = (SCREEN_WIDTH  - PW) / 2;
-  const int PY = (SCREEN_HEIGHT - PH) / 2;
+// ---------------------------------------------------------------------------
+// Secret menu — reached by turning the encoder 50 times on the About screen.
+// Options: 0=Set System Hours  1=PP Sensitivity  2=Motor Test  3=Return
+// ---------------------------------------------------------------------------
 
-  // Shadow / border
-  tft.fillRect(PX - 2, PY - 2, PW + 4, PH + 4, COLOR_TEXT_SECONDARY);
-  tft.fillRect(PX, PY, PW, PH, COLOR_BG);
-  // Triple-width coloured border
-  for (int t = 0; t < 3; t++) {
-    tft.drawRect(PX + t, PY + t, PW - t * 2, PH - t * 2, (uint16_t)COLOR_ERROR);
-  }
+static const char* kSecretMenuLabels[4] = {
+    "Set System Hours",
+    "PP Sensitivity",
+    "Motor Test",
+    "Return"
+};
 
-  // Title
-  tft.setFreeFont(nullptr);
-  tft.setTextSize(2);
+void drawSecretMenu(uint8_t selectedOption, bool forceRedraw) {
+  (void)forceRedraw;
+  tft.fillScreen(COLOR_BG);
+
+  // Title bar
   tft.setTextColor((uint16_t)COLOR_ERROR, COLOR_BG);
-  const char* title = "RESET SYSTEM HOURS?";
-  int titleW = strlen(title) * 12;
-  tft.setCursor(PX + (PW - titleW) / 2, PY + 14);
+  tft.setTextSize(3);
+  const char* title = "SERVICE MENU";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(title) * 18) / 2, 12);
   tft.print(title);
 
-  // Divider inside popup
-  tft.drawFastHLine(PX + 8, PY + 36, PW - 16, (uint16_t)COLOR_TEXT_SECONDARY);
+  tft.drawFastHLine(0, 46, SCREEN_WIDTH, (uint16_t)COLOR_ERROR);
 
-  // Warning line
-  tft.setTextSize(2);
-  tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
-  const char* warn = "This cannot be undone.";
-  int warnW = strlen(warn) * 12;
-  tft.setCursor(PX + (PW - warnW) / 2, PY + 46);
-  tft.print(warn);
+  // Menu rows
+  const int ROW_H  = 52;
+  const int ROW_Y0 = 56;
 
-  // Button row
-  const int btnY  = PY + PH - 48;
-  const int btnH  = 36;
-  const int btn0X = PX + 20;
-  const int btn0W = 150;
-  const int btn1X = PX + PW - 20 - 150;
-  const int btn1W = 150;
+  for (uint8_t i = 0; i < 4; i++) {
+    int rowY = ROW_Y0 + i * ROW_H;
+    bool sel = (i == selectedOption);
 
-  auto drawBtn = [&](int bx, int bw, uint8_t idx, const char* label, uint16_t hlColor) {
-    if (selectedOption == idx) {
-      tft.fillRect(bx, btnY, bw, btnH, hlColor);
-      tft.setTextColor(TFT_BLACK, hlColor);
+    if (sel) {
+      tft.fillRect(0, rowY, SCREEN_WIDTH, ROW_H - 2, (uint16_t)COLOR_MENU_SELECT);
+      tft.setTextColor(TFT_BLACK, (uint16_t)COLOR_MENU_SELECT);
     } else {
-      tft.fillRect(bx, btnY, bw, btnH, COLOR_BG);
-      tft.drawRect(bx, btnY, bw, btnH, (uint16_t)COLOR_TEXT_SECONDARY);
+      tft.fillRect(0, rowY, SCREEN_WIDTH, ROW_H - 2, COLOR_BG);
+      tft.drawRect(0, rowY, SCREEN_WIDTH, ROW_H - 2, (uint16_t)COLOR_TEXT_SECONDARY);
       tft.setTextColor(COLOR_TEXT_PRIMARY, COLOR_BG);
     }
-    tft.setTextSize(2);
-    int lw = strlen(label) * 12;
-    tft.setCursor(bx + (bw - lw) / 2, btnY + 10);
-    tft.print(label);
-  };
 
-  drawBtn(btn0X, btn0W, 0, "Reset",  (uint16_t)COLOR_ERROR);
-  drawBtn(btn1X, btn1W, 1, "Return", (uint16_t)COLOR_SUCCESS);
+    tft.setTextSize(3);
+    const char* lbl = kSecretMenuLabels[i];
+    int lw = (int)strlen(lbl) * 18;
+    tft.setCursor((SCREEN_WIDTH - lw) / 2, rowY + 14);
+    tft.print(lbl);
+  }
+}
+
+void drawSecretSetHoursScreen(uint32_t hours, bool forceRedraw) {
+  (void)forceRedraw;
+  tft.fillScreen(COLOR_BG);
+
+  // Title
+  tft.setTextColor((uint16_t)COLOR_ERROR, COLOR_BG);
+  tft.setTextSize(3);
+  const char* title = "SET SYSTEM HOURS";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(title) * 18) / 2, 12);
+  tft.print(title);
+  tft.drawFastHLine(0, 46, SCREEN_WIDTH, (uint16_t)COLOR_ERROR);
+
+  // Large hours value centred
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%lu hrs", (unsigned long)hours);
+  tft.setTextColor((uint16_t)COLOR_MENU_SELECT, COLOR_BG);
+  tft.setTextSize(5);
+  int w = (int)strlen(buf) * 30;
+  tft.setCursor((SCREEN_WIDTH - w) / 2, 110);
+  tft.print(buf);
+
+  // Instruction footer
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(2);
+  const char* hint = "Rotate to adjust  Press to save";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(hint) * 12) / 2, SCREEN_HEIGHT - 28);
+  tft.print(hint);
+}
+
+void drawSecretSensitivityScreen(uint16_t sensitivityPct, bool forceRedraw) {
+  (void)forceRedraw;
+  tft.fillScreen(COLOR_BG);
+
+  // Title
+  tft.setTextColor((uint16_t)COLOR_ERROR, COLOR_BG);
+  tft.setTextSize(3);
+  const char* title = "PP SENSITIVITY";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(title) * 18) / 2, 12);
+  tft.print(title);
+  tft.drawFastHLine(0, 46, SCREEN_WIDTH, (uint16_t)COLOR_ERROR);
+
+  // Description
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(2);
+  const char* desc = "Spike threshold multiplier";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(desc) * 12) / 2, 58);
+  tft.print(desc);
+  const char* desc2 = "Lower = more sensitive";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(desc2) * 12) / 2, 80);
+  tft.print(desc2);
+
+  // Large percentage value
+  char buf[12];
+  snprintf(buf, sizeof(buf), "%u%%", sensitivityPct);
+  tft.setTextColor((uint16_t)COLOR_MENU_SELECT, COLOR_BG);
+  tft.setTextSize(6);
+  int w = (int)strlen(buf) * 36;
+  tft.setCursor((SCREEN_WIDTH - w) / 2, 110);
+  tft.print(buf);
+
+  // Range hint
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(2);
+  char rangeHint[24];
+  snprintf(rangeHint, sizeof(rangeHint), "Range: %u%% - %u%%", PP_SENSITIVITY_MIN, PP_SENSITIVITY_MAX);
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(rangeHint) * 12) / 2, SCREEN_HEIGHT - 52);
+  tft.print(rangeHint);
+
+  // Instruction footer
+  const char* hint = "Rotate to adjust  Press to save";
+  tft.setCursor((SCREEN_WIDTH - (int)strlen(hint) * 12) / 2, SCREEN_HEIGHT - 28);
+  tft.print(hint);
 }
 
 // ---------------------------------------------------------------------------
@@ -1698,25 +1744,63 @@ void drawOtaScreen(OtaState state, const char* detail, int progress,
 
     // ------------------------------------------------------------------
     case OTA_STATE_VERSION_CURRENT:
-      if (stateChanged) {
-        tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
-        tft.setFreeFont(nullptr);
+      if (stateChanged || selChanged) {
+        if (stateChanged) {
+          tft.fillRect(0, CY, SCREEN_WIDTH, CH, COLOR_BG);
+          tft.setFreeFont(nullptr);
 
-        tft.setTextSize(3);
-        tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
-        {
-          const char* ln = "Firmware up to date!";
-          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 18) / 2, MCY - 30);
-          tft.print(ln);
+          tft.setTextSize(3);
+          tft.setTextColor(COLOR_SUCCESS, COLOR_BG);
+          {
+            const char* ln = "Firmware up to date!";
+            tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 18) / 2, MCY - 60);
+            tft.print(ln);
+          }
+
+          tft.setTextSize(2);
+          tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+          {
+            char ln[40];
+            snprintf(ln, sizeof(ln), "Current version: %s", FIRMWARE_VERSION);
+            tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, MCY - 20);
+            tft.print(ln);
+          }
         }
 
-        tft.setTextSize(2);
-        tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+        // Two button options: RETURN (safe default) and REINSTALL
+        const int BTN_Y   = MCY + 10;
+        const int BTN_H   = 40;
+        const int BTN_W   = 160;
+        const int BTN0_X  = (SCREEN_WIDTH / 2) - BTN_W - 10;
+        const int BTN1_X  = (SCREEN_WIDTH / 2) + 10;
+
+        // RETURN button (option 0 — safe default)
         {
-          char ln[40];
-          snprintf(ln, sizeof(ln), "Current version: %s", FIRMWARE_VERSION);
-          tft.setCursor((SCREEN_WIDTH - (int)strlen(ln) * 12) / 2, MCY + 10);
-          tft.print(ln);
+          bool sel = (selectedOption == 0);
+          tft.fillRect(BTN0_X, BTN_Y, BTN_W, BTN_H,
+                       sel ? COLOR_SUCCESS : COLOR_BG);
+          tft.drawRect(BTN0_X, BTN_Y, BTN_W, BTN_H, COLOR_SUCCESS);
+          tft.setTextColor(sel ? TFT_BLACK : COLOR_SUCCESS,
+                           sel ? COLOR_SUCCESS : COLOR_BG);
+          tft.setTextSize(2);
+          const char* lbl = " RETURN";
+          tft.setCursor(BTN0_X + (BTN_W - (int)strlen(lbl) * 12) / 2,
+                        BTN_Y + (BTN_H - 16) / 2);
+          tft.print(lbl);
+        }
+        // REINSTALL button (option 1)
+        {
+          bool sel = (selectedOption == 1);
+          tft.fillRect(BTN1_X, BTN_Y, BTN_W, BTN_H,
+                       sel ? COLOR_WARNING : COLOR_BG);
+          tft.drawRect(BTN1_X, BTN_Y, BTN_W, BTN_H, COLOR_WARNING);
+          tft.setTextColor(sel ? TFT_BLACK : COLOR_WARNING,
+                           sel ? COLOR_WARNING : COLOR_BG);
+          tft.setTextSize(2);
+          const char* lbl = "REINSTALL";
+          tft.setCursor(BTN1_X + (BTN_W - (int)strlen(lbl) * 12) / 2,
+                        BTN_Y + (BTN_H - 16) / 2);
+          tft.print(lbl);
         }
       }
       break;
@@ -1918,6 +2002,9 @@ void drawOtaScreen(OtaState state, const char* detail, int progress,
         footerColor = COLOR_TEXT_SECONDARY;
         break;
       case OTA_STATE_VERSION_CURRENT:
+        footerText  = "Rotate to select, press to confirm";
+        footerColor = COLOR_TEXT_SECONDARY;
+        break;
       case OTA_STATE_FAILED:
       case OTA_STATE_CANCELLED:
         footerText  = "Press button to return";

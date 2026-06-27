@@ -30,7 +30,11 @@ void drawSupportTechScreen(void);
 void drawSupportContactScreen(void);
 void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, uint8_t selectedOption);
 void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion, bool confirmVisible = false);
-void drawAboutResetPopup(uint8_t selectedOption);  // 0 = Reset, 1 = Return
+
+// Secret menu (reached by turning the encoder 50 times on the About screen)
+void drawSecretMenu(uint8_t selectedOption, bool forceRedraw = false);           // 0=Set Hours 1=PP Sensitivity 2=Motor Test 3=Return
+void drawSecretSetHoursScreen(uint32_t hours, bool forceRedraw = false);         // Encoder-set system hours
+void drawSecretSensitivityScreen(uint16_t sensitivityPct, bool forceRedraw = false);  // PP sensitivity %
 
 // OTA Update screen
 #include "ota_update.h"

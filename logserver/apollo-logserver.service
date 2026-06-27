@@ -1,0 +1,23 @@
+[Unit]
+Description=Apollo HVLP Device Log Server
+After=network.target
+
+[Service]
+Type=simple
+User=ec2-user
+WorkingDirectory=/home/ec2-user/apollo-logserver
+ExecStart=/usr/bin/python3 /home/ec2-user/apollo-logserver/log_server.py
+Restart=on-failure
+RestartSec=5
+
+# ── Configuration ──────────────────────────────────────────────────────────
+# Change API_KEY to a strong random secret and update OTA_LOG_API_KEY in
+# config.h to match before deploying to production.
+Environment=LOG_FILE=/home/ec2-user/apollo-logserver/device_log.ndjson
+Environment=API_KEY=apollo-secret-key
+Environment=PORT=8081
+Environment=MAX_BYTES=5242880
+Environment=KEEP_LINES=500
+
+[Install]
+WantedBy=multi-user.target

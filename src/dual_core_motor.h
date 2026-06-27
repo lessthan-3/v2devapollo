@@ -51,6 +51,9 @@ typedef struct {
     volatile uint32_t loopTimeUs;
     volatile uint32_t maxLoopTimeUs;
 
+    // Secret-menu adjustable spike-threshold multiplier (1.0 = default, range 0.1–3.0)
+    volatile float    spikeMultiplier;
+
     portMUX_TYPE mutex;
 } MotorSharedData;
 
@@ -83,6 +86,9 @@ void requestPidReset(void);
 /** @brief Enable or disable the motor (thread-safe). */
 void setMotorEnabledSafe(bool enable);
 
+/** @brief Get the motor task handle (for suspend/resume during OTA). */
+TaskHandle_t getMotorTaskHandle(void);
+
 /** @brief Set PID gains (thread-safe). */
 void setPidGainsSafe(float kp, float ki, float kd);
 
@@ -103,5 +109,11 @@ float getIdleEntryDeviationSafe(void);
 
 /** @brief Request exit from power pause (thread-safe). */
 void requestIdleExitSafe(void);
+
+/** @brief Set the power-pause spike-threshold multiplier (thread-safe). */
+void setSpikeMultiplierSafe(float multiplier);
+
+/** @brief Get the power-pause spike-threshold multiplier (thread-safe). */
+float getSpikeMultiplierSafe(void);
 
 #endif // DUAL_CORE_MOTOR_H

@@ -53,9 +53,10 @@ typedef struct {
     char        latestVersion[32];   ///< e.g. "v2.1.0"
     char        downloadUrl[256];    ///< firmware.bin asset URL
     char        errorMessage[96];    ///< Human-readable failure description
-    volatile int  downloadProgress;  ///< 0-100 during OTA_STATE_DOWNLOADING
-    volatile bool updateConfirmed;   ///< Set true by UI to start download
-    volatile bool cancelRequested;   ///< Set true by UI to abort
+    volatile int  downloadProgress;      ///< 0-100 during OTA_STATE_DOWNLOADING
+    volatile bool updateConfirmed;       ///< Set true by UI to start download
+    volatile bool cancelRequested;       ///< Set true by UI to abort
+    volatile bool forceInstallRequested; ///< Set true by UI to reinstall even when version is current
 } OtaStatus;
 
 extern OtaStatus otaStatus;

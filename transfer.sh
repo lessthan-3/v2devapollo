@@ -1,0 +1,2 @@
+scp -i ~/.ssh/apolloserver.pem examplehttpserver/manifest.json ec2-user@ec2-18-191-98-191.us-east-2.compute.amazonaws.com:/var/www/firmware/
+scp -i ~/.ssh/apolloserver.pem .pio/build/esp32-s3-devkitc-1/firmware.bin ec2-user@ec2-18-191-98-191.us-east-2.compute.amazonaws.com:/var/www/firmware/

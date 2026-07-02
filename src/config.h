@@ -150,9 +150,9 @@
 // at the 3 PSI floor value since IDLE_TARGET_PSI is below 3 PSI.
 #define IDLE_HOLD_STABLE_SECONDS    1       // Seconds stable at idle speed before entering HOLD
 #define IDLE_HOLD_SPIKE_UNITS       10.0f   // Spike threshold during HOLD (matches 3 PSI entry floor)
-#define IDLE_RAMP_TIMEOUT_SECONDS   8       // Max seconds in PID ramp phase before forcing to HOLD
-#define IDLE_RAMP_LOCKOUT_SECONDS   1       // Lockout: no exit check for first N seconds of ramp
-#define IDLE_RAMP_SPIKE_UNITS       50.0f  // Speed above (bufMin+bufMax)/2 of recent window that signals a load event
+#define IDLE_RAMP_TIMEOUT_SECONDS      8       // Max seconds in PID ramp phase before forcing to HOLD
+#define IDLE_RAMP_LOCKOUT_SECONDS      1       // Lockout at low PSI (~3 PSI): no exit check for first N seconds
+#define IDLE_RAMP_LOCKOUT_SECONDS_MAX  5       // Lockout at high PSI (MAX_PSI_THRESHOLD): scales linearly between these two
 
 // ============================================================================
 // Temperature Sensor

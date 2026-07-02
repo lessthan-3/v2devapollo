@@ -125,9 +125,9 @@ void motorControlTask(void *parameter) {
     //                      upward deviation above this minimum after the lockout
     //                      period indicates the PID is fighting a real load event
     //                      (user pulling the trigger) rather than normal oscillation.
-    uint32_t idleRampLoopCount = 0;
+    uint32_t idleRampLoopCount    = 0;
+    uint32_t idleRampLockoutLoops  = (IDLE_RAMP_LOCKOUT_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;  // recomputed at each ramp entry
     const uint32_t idleRampTimeoutLoops = (IDLE_RAMP_TIMEOUT_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
-    const uint32_t idleRampLockoutLoops = (IDLE_RAMP_LOCKOUT_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
     
     // Main motor control loop
     while (true) {
@@ -220,7 +220,7 @@ void motorControlTask(void *parameter) {
             if (idleState == IDLE_STATE_PID_RAMP) {
                 idleRampLoopCount++;
 
-                // Always run PID first to get the current speed value
+                // Run PID toward idle target
                 motorPid.setpoint = IDLE_TARGET_PSI;
                 pidOut = pidCalculate(&motorPid, smoothedPressure);
                 int adjustedSpeed = (int)lastSpeed + (int)lroundf(pidOut);
@@ -229,16 +229,14 @@ void motorControlTask(void *parameter) {
                 setMotorSpeed(speed);
                 lastSpeed = speed;
 
-                // --- Evaluate buffer BEFORE pushing current speed ---
-                // Computing min/max from the existing buffer (not yet containing this
-                // sample) gives an uncontaminated recent-history reference.  The
-                // midpoint (min+max)/2 tracks the centre of recent oscillation and
-                // adapts as the ramp progresses — unlike a running minimum it doesn't
-                // drift closer to the current speed over time, so normal PID swings
-                // stay well below the threshold while a genuine load spike stands out.
-                bool  idleNowSteady   = false;
-                float idleBufMean     = 0.0f;
-                float idleBufMidpoint = 0.0f;
+                // Push into idle-phase ring buffer
+                idleSpeedBuf[idleSpeedBufIdx] = speed;
+                idleSpeedBufIdx = (idleSpeedBufIdx + 1) % IDLE_SPEED_STABLE_WINDOW;
+                if (idleSpeedBufIdx == 0) idleSpeedBufFull = true;
+
+                // Evaluate spread once buffer is full
+                bool idleNowSteady = false;
+                float idleBufMean  = 0.0f;
                 if (idleSpeedBufFull) {
                     uint16_t minS = idleSpeedBuf[0], maxS = idleSpeedBuf[0];
                     uint32_t sum  = 0;
@@ -247,29 +245,39 @@ void motorControlTask(void *parameter) {
                         if (idleSpeedBuf[i] > maxS) maxS = idleSpeedBuf[i];
                         sum += idleSpeedBuf[i];
                     }
-                    idleBufMean     = (float)sum / IDLE_SPEED_STABLE_WINDOW;
-                    idleBufMidpoint = ((float)minS + (float)maxS) * 0.5f;
-                    idleNowSteady   = ((maxS - minS) <= IDLE_SPEED_STABLE_SPREAD);
+                    idleBufMean   = (float)sum / IDLE_SPEED_STABLE_WINDOW;
+                    idleNowSteady = ((maxS - minS) <= IDLE_SPEED_STABLE_SPREAD);
                 }
 
-                // --- Load-spike exit (after lockout, once buffer is full) ---
-                // Compare current speed against the buffer midpoint — a large positive
-                // deviation means the PID is fighting a real load (trigger pull), not
-                // normal oscillation around the ramp trajectory.
+                if (idleNowSteady && !idleMotorSteady) {
+                    idleMotorSteady = true;
+                    Serial.printf("[PowerPause] Idle speed stable: speed=%u (mean=%.1f)\n",
+                                  speed, idleBufMean);
+                } else if (!idleNowSteady) {
+                    idleMotorSteady = false;
+                }
+
+                // --- Trigger-pull exit ---
+                // Requires BOTH conditions simultaneously:
+                //   1. Pressure has dropped below the idle exit threshold
+                //   2. Motor speed is INCREASING (oldest buffer sample < current speed)
+                //      meaning the PID is commanding more power to fight an external load.
+                // During a clean descent through this pressure level the PID is
+                // reducing power (speed decreasing), making condition 2 false.
+                // A genuine trigger pull causes a pressure drop AND a PID-driven
+                // speed increase at the same time — both must be true to exit.
                 bool rampLoadExit = false;
                 if (idleRampLoopCount > idleRampLockoutLoops && idleSpeedBufFull) {
-                    float rampDeviation = (float)speed - idleBufMidpoint;
-                    if (rampDeviation > IDLE_RAMP_SPIKE_UNITS) {
+                    bool pressureDropped = (smoothedPressure < (IDLE_TARGET_PSI - IDLE_EXIT_DROP_PSI));
+                    // idleSpeedBufIdx is the NEXT write slot — in a full circular buffer
+                    // that is also the OLDEST sample (~200 ms ago at 200 Hz).
+                    bool speedIncreasing = (speed > idleSpeedBuf[idleSpeedBufIdx]);
+                    if (pressureDropped && speedIncreasing) {
                         rampLoadExit = true;
-                        Serial.printf("[PowerPause] RAMP exit by load: speed=%u, mid=%.1f, dev=%.1f\n",
-                                      speed, idleBufMidpoint, rampDeviation);
+                        Serial.printf("[PowerPause] RAMP exit by trigger: psi=%.2f, speed=%u, was=%u\n",
+                                      smoothedPressure, speed, idleSpeedBuf[idleSpeedBufIdx]);
                     }
                 }
-
-                // --- Push current speed into buffer AFTER spike check ---
-                idleSpeedBuf[idleSpeedBufIdx] = speed;
-                idleSpeedBufIdx = (idleSpeedBufIdx + 1) % IDLE_SPEED_STABLE_WINDOW;
-                if (idleSpeedBufIdx == 0) idleSpeedBufFull = true;
 
                 if (rampLoadExit) {
                     idleState           = IDLE_STATE_OFF;
@@ -289,14 +297,6 @@ void motorControlTask(void *parameter) {
                     pidReset(&motorPid);
                 } else {
 
-                if (idleNowSteady && !idleMotorSteady) {
-                    idleMotorSteady = true;
-                    Serial.printf("[PowerPause] Idle speed stable: speed=%u (mean=%.1f), entering HOLD\n",
-                                  speed, idleBufMean);
-                } else if (!idleNowSteady) {
-                    idleMotorSteady = false;
-                }
-
                 if (idleMotorSteady && idleNowSteady) {
                     if (idleStableCounter < idleHoldStableLoops) {
                         idleStableCounter++;
@@ -310,7 +310,6 @@ void motorControlTask(void *parameter) {
                     if (idleHoldSpeed < IDLE_MIN_HOLD_SPEED) {
                         idleHoldSpeed = IDLE_MIN_HOLD_SPEED;
                     }
-                    // Seed the hold-phase buffer with the current mean as baseline
                     idleHoldMean   = idleBufMean;
                     idleHoldMeanSet = true;
                     idleState = IDLE_STATE_HOLD;
@@ -331,7 +330,7 @@ void motorControlTask(void *parameter) {
                     pidReset(&motorPid);
                     Serial.printf("[PowerPause] RAMP timeout: forced to HOLD, holdSpeed=%u\n", idleHoldSpeed);
                 }
-                } // end else (no load-spike exit)
+                } // end else (no trigger-pull exit)
             } else if (idleState == IDLE_STATE_HOLD) {
                 setMotorSpeed(idleHoldSpeed);
                 speed = idleHoldSpeed;
@@ -418,6 +417,8 @@ void motorControlTask(void *parameter) {
                         idleRampLoopCount = 0;
                         idleHoldSpeed = 0;
                         maxPressureRecorded = 0.0f;
+                        // MAX mode is always at the highest PSI — use maximum lockout
+                        idleRampLockoutLoops = (IDLE_RAMP_LOCKOUT_SECONDS_MAX * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
                         pidReset(&motorPid);
                     }
                 } else {
@@ -594,6 +595,18 @@ void motorControlTask(void *parameter) {
                             pidSaturatedLogged = false;
                             speedBufFull       = false;
                             speedBufIdx        = 0;
+                            // Scale lockout linearly with target PSI:
+                            // 3 PSI → IDLE_RAMP_LOCKOUT_SECONDS, MAX_PSI_THRESHOLD → IDLE_RAMP_LOCKOUT_SECONDS_MAX
+                            // Higher pressure means the motor starts faster and takes longer to descend,
+                            // so false exits from normal PID oscillation are more likely without a longer lockout.
+                            {
+                                float lt = (target - 3.0f) / (MAX_PSI_THRESHOLD - 3.0f);
+                                if (lt < 0.0f) lt = 0.0f;
+                                if (lt > 1.0f) lt = 1.0f;
+                                float lockSecs = IDLE_RAMP_LOCKOUT_SECONDS +
+                                                 lt * (IDLE_RAMP_LOCKOUT_SECONDS_MAX - IDLE_RAMP_LOCKOUT_SECONDS);
+                                idleRampLockoutLoops = (uint32_t)(lockSecs * (1000000.0f / MOTOR_LOOP_INTERVAL_US));
+                            }
                             pidReset(&motorPid);
                         }
                     }

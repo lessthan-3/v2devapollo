@@ -21,6 +21,8 @@ extern bool lightThemeEnabled;
 #define COLOR_LABEL        (lightThemeEnabled ? (uint16_t)TFT_BLACK      : (uint16_t)TFT_WHITE)
 #undef  COLOR_TEXT_SECONDARY
 #define COLOR_TEXT_SECONDARY (lightThemeEnabled ? (uint16_t)TFT_DARKGREY : (uint16_t)TFT_LIGHTGREY)
+#undef  COLOR_TEXT_SECRET
+#define COLOR_TEXT_SECRET    (lightThemeEnabled ? (uint16_t)TFT_DARKGREEN : (uint16_t)TFT_YELLOW)
 // Green reads poorly on a white background — use dark green in light mode
 #undef  COLOR_SUCCESS
 #define COLOR_SUCCESS        (lightThemeEnabled ? (uint16_t)TFT_DARKGREEN : (uint16_t)TFT_GREEN)
@@ -1480,7 +1482,7 @@ void drawSecretSetHoursScreen(uint32_t hours, bool forceRedraw) {
   // Large hours value centred
   char buf[16];
   snprintf(buf, sizeof(buf), "%lu hrs", (unsigned long)hours);
-  tft.setTextColor((uint16_t)COLOR_MENU_SELECT, COLOR_BG);
+  tft.setTextColor(COLOR_TEXT_SECRET, COLOR_BG);
   tft.setTextSize(5);
   int w = (int)strlen(buf) * 30;
   tft.setCursor((SCREEN_WIDTH - w) / 2, 110);
@@ -1519,7 +1521,7 @@ void drawSecretSensitivityScreen(uint16_t sensitivityPct, bool forceRedraw) {
   // Large percentage value
   char buf[12];
   snprintf(buf, sizeof(buf), "%u%%", sensitivityPct);
-  tft.setTextColor((uint16_t)COLOR_MENU_SELECT, COLOR_BG);
+  tft.setTextColor(COLOR_TEXT_SECRET, COLOR_BG);
   tft.setTextSize(6);
   int w = (int)strlen(buf) * 36;
   tft.setCursor((SCREEN_WIDTH - w) / 2, 110);

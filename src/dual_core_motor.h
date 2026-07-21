@@ -54,6 +54,11 @@ typedef struct {
     // Secret-menu adjustable spike-threshold multiplier (1.0 = default, range 0.1–3.0)
     volatile float    spikeMultiplier;
 
+    // Self-adjusting PowerPause hold speed (0-1000). Written by motor task on HOLD exit.
+    volatile uint16_t ppHoldSpeed;
+    // Set by motor task when ppHoldSpeed changes; cleared by display task after saving to flash.
+    volatile bool     ppSpeedSaveRequest;
+
     portMUX_TYPE mutex;
 } MotorSharedData;
 
@@ -115,5 +120,11 @@ void setSpikeMultiplierSafe(float multiplier);
 
 /** @brief Get the power-pause spike-threshold multiplier (thread-safe). */
 float getSpikeMultiplierSafe(void);
+
+/** @brief Set the self-adjusting PowerPause hold speed (thread-safe). */
+void setPpHoldSpeedSafe(uint16_t speed);
+
+/** @brief Get the self-adjusting PowerPause hold speed (thread-safe). */
+uint16_t getPpHoldSpeedSafe(void);
 
 #endif // DUAL_CORE_MOTOR_H

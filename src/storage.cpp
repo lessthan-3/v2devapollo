@@ -117,6 +117,7 @@ void loadSettings(void) {
         displayUnits            = (DisplayUnits)prefs.getUChar("units", UNITS_IMPERIAL);
         lightThemeEnabled       = prefs.getBool("lightTheme",  false);
         powerPauseSensitivityPct = prefs.getUShort("ppSensPct", PP_SENSITIVITY_DEFAULT);
+        powerPauseHoldSpeed     = prefs.getUShort("ppSpeed",   PP_HOLD_SPEED_DEFAULT);
         prefs.end();
     } else {
         prefs.end();
@@ -124,6 +125,7 @@ void loadSettings(void) {
         powerPauseSeconds       = IDLE_ENTRY_SECONDS;
         powerPauseBeeperEnabled = true;
         powerPauseSensitivityPct = PP_SENSITIVITY_DEFAULT;
+        powerPauseHoldSpeed     = PP_HOLD_SPEED_DEFAULT;
     }
 
     // Target pressure always boots at 0 — not persisted
@@ -133,11 +135,13 @@ void loadSettings(void) {
     settingsIdleDev   = constrain(settingsIdleDev,   IDLE_DEV_MIN, IDLE_DEV_MAX);
     powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
     powerPauseSensitivityPct = constrain(powerPauseSensitivityPct, (uint16_t)PP_SENSITIVITY_MIN, (uint16_t)PP_SENSITIVITY_MAX);
+    powerPauseHoldSpeed = constrain(powerPauseHoldSpeed, (uint16_t)PP_HOLD_SPEED_MIN, (uint16_t)PP_HOLD_SPEED_MAX);
 
     // Push to motor task
     setIdleEntryDeviationSafe(settingsIdleDev);
     setIdleEntrySecondsSafe(powerPauseSeconds);
     setSpikeMultiplierSafe(powerPauseSensitivityPct / 100.0f);
+    setPpHoldSpeedSafe(powerPauseHoldSpeed);
 }
 
 void saveSettings(void) {
@@ -148,6 +152,7 @@ void saveSettings(void) {
         prefs.putUChar("units",     (uint8_t)displayUnits);
         prefs.putBool("lightTheme",  lightThemeEnabled);
         prefs.putUShort("ppSensPct", powerPauseSensitivityPct);
+        prefs.putUShort("ppSpeed",   powerPauseHoldSpeed);
         prefs.end();
     } else {
         prefs.end();

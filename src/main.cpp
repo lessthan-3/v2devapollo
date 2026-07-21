@@ -56,6 +56,9 @@ bool        lightThemeEnabled       = false;
 // Power-pause sensitivity (secret menu) — stored as integer percentage 10-300
 uint16_t    powerPauseSensitivityPct = PP_SENSITIVITY_DEFAULT;
 
+// Power-pause hold speed (hidden, self-adjusting) — persisted to flash
+uint16_t    powerPauseHoldSpeed      = PP_HOLD_SPEED_DEFAULT;
+
 // Motor test mode — tracks active test so PSI can be restored on exit
 bool          motorTestActive        = false;
 float         preMotorTestTargetPsi  = 0.0f;
@@ -513,6 +516,21 @@ void loop() {
         idleState            = (IdleState)motorShared.idleState;
         motorSpeed           = motorShared.motorSpeed;
         portEXIT_CRITICAL(&motorShared.mutex);
+    }
+
+    // Poll for PowerPause hold-speed save request (motor task → flash)
+    {
+        bool ppSaveNeeded = false;
+        portENTER_CRITICAL(&motorShared.mutex);
+        if (motorShared.ppSpeedSaveRequest) {
+            ppSaveNeeded = true;
+            motorShared.ppSpeedSaveRequest = false;
+            powerPauseHoldSpeed = motorShared.ppHoldSpeed;
+        }
+        portEXIT_CRITICAL(&motorShared.mutex);
+        if (ppSaveNeeded) {
+            saveSettings();
+        }
     }
 
     // displaySpeed: clamp to 0 when target is zero (motor off) so the UI

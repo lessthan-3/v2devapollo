@@ -198,6 +198,24 @@
 #define PP_SENSITIVITY_DEFAULT  100     // 100% = 1.0x multiplier
 #define PP_SENSITIVITY_MIN      10      // 10% = 0.1x multiplier (most sensitive)
 #define PP_SENSITIVITY_MAX      300     // 300% = 3.0x multiplier (least sensitive)
+
+// Self-adjusting PowerPause hold speed
+// Motor goes straight to PP_HOLD_SPEED_DEFAULT (25%) on entry instead of PID ramping.
+// After each HOLD exit the speed is nudged ±PP_HOLD_SPEED_STEP if the settled
+// pressure was outside [PP_SETTLE_LOW_PSI, PP_SETTLE_HIGH_PSI], and saved to flash.
+#define PP_HOLD_SPEED_DEFAULT       250     // 25% of 1000 (initial pause speed)
+#define PP_HOLD_SPEED_MIN           50      // 5%  minimum (avoid stall)
+#define PP_HOLD_SPEED_MAX           700     // 70% maximum
+#define PP_HOLD_SPEED_STEP          20      // 2% nudge per pause cycle
+#define PP_SETTLE_LOW_PSI           2.4f    // Lower bound of acceptable settled pressure
+#define PP_SETTLE_HIGH_PSI          2.8f    // Upper bound of acceptable settled pressure
+
+// Pressure stability detection during RAMP phase
+#define PP_PRESSURE_STABLE_WINDOW   40      // Ring buffer depth (40 samples = 200 ms @ 200 Hz)
+#define PP_PRESSURE_STABLE_BAND_PSI 0.2f    // Max-min spread (PSI) to declare pressure stable
+#define PP_PRESSURE_STABLE_SECONDS  0.5f    // Seconds of continuous stability → enter HOLD
+#define PP_RAMP_LOCKOUT_SECONDS     2.0f    // No trigger-pull exit for first N seconds of RAMP
+#define PP_HOLD_LOCKOUT_SECONDS     2.0f    // No exit check for first N seconds after entering HOLD
 #define PP_SENSITIVITY_STEP     10      // 10% per encoder detent
 
 // Secret menu — max user-settable system hours

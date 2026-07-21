@@ -23,6 +23,7 @@ extern bool     powerPauseBeeperEnabled;
 extern DisplayUnits displayUnits;
 extern bool     lightThemeEnabled;
 extern uint16_t powerPauseSensitivityPct;   // 10–300 %, stored as integer
+extern uint16_t powerPauseHoldSpeed;        // self-adjusting PP speed 0-1000 (hidden)
 
 /**
  * @brief Load the filter hour meter from NVS into totalRuntimeTenths.

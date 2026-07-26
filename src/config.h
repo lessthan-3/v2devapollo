@@ -319,11 +319,24 @@
 #define OTA_ROLLBACK_TIMEOUT_S  60             // Seconds before auto-rollback
 
 // ============================================================================
+// Voltage Sensor (Mains monitoring)
+// ============================================================================
+// 16V AC transformer secondary → voltage divider → 1V at full (115V) mains.
+// Scale: 1V on ADC input = VOLTAGE_MAINS_SCALE V of mains.
+#define VOLTAGE_SENSOR_PIN      16      // IO16 - Mains voltage divider ADC input
+#define VOLTAGE_MAINS_SCALE     161.0f  // V_mains per V_adc (115 * 1.4 calibration factor)
+
+// ============================================================================
 // Debug Flags
 // ============================================================================
 #define DEBUG_SERIAL_OUTPUT     1   // 1 = enable serial debug in loop()
 // Add -DTRIAC_DEBUG_SERIAL to build_flags to enable triac ISR diagnostics
 // Add -DSIMULATE_AC_60HZ    to build_flags to simulate zero crossings
+
+// Set to 1 to replace the HOURS display in the bottom-right info bar with the
+// live mains voltage reading (useful for verifying the voltage divider circuit).
+// Set to 0 (or comment out) before production builds.
+#define DEBUG_MAINS_VOLTAGE     1
 
 // Set to 1 to enable the overlay preview carousel on the main menu screen.
 // Cycles through every warning overlay on a 3-second rotation so the UI can

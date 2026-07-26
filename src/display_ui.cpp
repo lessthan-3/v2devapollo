@@ -634,6 +634,30 @@ void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw) {
   tft.setTextSize(1);
 }
 
+#if DEBUG_MAINS_VOLTAGE
+void drawRuntimeMainsVoltage(float volts, bool forceRedraw) {
+  if (volts < 0.0f) volts = 0.0f;
+
+  char buf[24];
+  snprintf(buf, sizeof(buf), "MAINS %3.0f VAC ", volts);
+
+  static char lastBuf[24] = "";
+  if (!forceRedraw && strcmp(buf, lastBuf) == 0) {
+    return;
+  }
+  strncpy(lastBuf, buf, sizeof(lastBuf));
+
+  // Bottom zone — right half: replaces HOURS in debug mode
+  const int infoLineY = THIRD_2_Y + 22;
+  tft.setTextFont(1);
+  tft.setTextSize(2);
+  tft.setTextColor(COLOR_DEBUG, COLOR_BG);
+  tft.setCursor(SCREEN_WIDTH / 2 + 60, infoLineY);
+  tft.print(buf);
+  tft.setTextSize(1);
+}
+#endif
+
 void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw) {
   // Build the display string first — compare before touching the display
   // All branches are padded to the same 14-char width to avoid leftover pixels

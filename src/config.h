@@ -133,6 +133,7 @@
 #define IDLE_EXIT_DROP_PSI          0.2f    // Pressure drop below idle target to exit
 #define IDLE_MIN_HOLD_SPEED         50      // Min motor speed in idle hold (0-1000)
 #define MAX_PRESSURE_DEVIATION_PSI  0.35f   // Deviation from peak used for MAX-mode power pause entry
+#define MAX_MODE_LOAD_PSI_THRESHOLD 6.9f    // Below this PSI in MAX mode → system under load, PP suppressed
 #define IDLE_LOOP_INCREMENT         3       // Ticks per loop when stable motor speed detected
 
 // Motor-speed steady-state detection for power pause entry
@@ -214,8 +215,16 @@
 #define PP_PRESSURE_STABLE_WINDOW   40      // Ring buffer depth (40 samples = 200 ms @ 200 Hz)
 #define PP_PRESSURE_STABLE_BAND_PSI 0.2f    // Max-min spread (PSI) to declare pressure stable
 #define PP_PRESSURE_STABLE_SECONDS  0.5f    // Seconds of continuous stability → enter HOLD
-#define PP_RAMP_LOCKOUT_SECONDS     2.0f    // No trigger-pull exit for first N seconds of RAMP
-#define PP_HOLD_LOCKOUT_SECONDS     2.0f    // No exit check for first N seconds after entering HOLD
+#define PP_RAMP_LOCKOUT_SECONDS     0.0f    // No trigger-pull exit for first N seconds of RAMP
+#define PP_HOLD_LOCKOUT_SECONDS     0.0f    // No exit check for first N seconds after entering HOLD
+
+// Velocity-ramp descent parameters
+// Motor speed decreases at a constant rate until pressure drops below PP_RAMP_TARGET_PSI.
+// Trigger detection: if pressure falls faster than PP_RAMP_TRIGGER_DROP_PSI over the
+// ring-buffer window, the user has pulled the trigger and we exit PowerPause.
+#define PP_RAMP_SPEED_DEC_PER_SEC   100     // Speed units/second to decrease (100 = 10%/s)
+#define PP_RAMP_TARGET_PSI          2.8f    // Pressure target that ends the descent phase
+#define PP_RAMP_TRIGGER_DROP_PSI    0.4f    // Max PSI drop in the buffer window before trigger exit
 #define PP_SENSITIVITY_STEP     10      // 10% per encoder detent
 
 // Secret menu — max user-settable system hours

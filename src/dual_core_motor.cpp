@@ -64,6 +64,30 @@ static uint16_t calculateMaxSpeedFromTarget(float targetPsi) {
 }
 
 /**
+ * @brief Motor speed threshold above which the unit is under active spray load.
+ *
+ * Quadratic fit to characterised loaded-motor data (0-1000 speed units):
+ *   speed = 17·psi² − 64·psi + 520
+ *
+ * Characterisation table (psi / unloaded% / loaded%):
+ *   3 PSI → 42% / 46%  (threshold: ~48%, conservative)
+ *   4 PSI → 48% / 54%
+ *   5 PSI → 55% / 62%
+ *   6 PSI → 62% / 74%
+ *   7 PSI → 72% / 100%
+ *
+ * If the rolling mean motor speed meets or exceeds this threshold the unit is
+ * considered to be under active spray demand and power-pause entry is suppressed.
+ */
+static uint16_t activeLoadThreshold(float psi) {
+    if (psi < 3.0f) psi = 3.0f;
+    float t = 17.0f * psi * psi - 64.0f * psi + 520.0f;
+    if (t > 1000.0f) t = 1000.0f;
+    if (t < 0.0f)    t = 0.0f;
+    return (uint16_t)t;
+}
+
+/**
  * @brief Motor control task - runs on Core 0
  * 
  * High-frequency loop that handles:
@@ -123,6 +147,13 @@ void motorControlTask(void *parameter) {
     uint32_t       idleRampLoopCount    = 0;
     const uint32_t idleRampLockoutLoops = (uint32_t)(PP_RAMP_LOCKOUT_SECONDS * (1000000.0f / MOTOR_LOOP_INTERVAL_US));
     const uint32_t idleRampTimeoutLoops = (IDLE_RAMP_TIMEOUT_SECONDS * 1000000UL) / MOTOR_LOOP_INTERVAL_US;
+
+    // --- Velocity-ramp descent state ---
+    // Speed decreases at PP_RAMP_SPEED_DEC_PER_SEC until pressure < PP_RAMP_TARGET_PSI.
+    float rampCurrentSpeed    = 0.0f;   // current ramp speed (float for sub-unit precision)
+    bool  rampDescendComplete = false;  // true once pressure dropped below PP_RAMP_TARGET_PSI
+    const float rampSpeedDecPerLoop =
+        PP_RAMP_SPEED_DEC_PER_SEC * (MOTOR_LOOP_INTERVAL_US / 1000000.0f);
 
     // --- HOLD-phase lockout (avoid instant bounce on entry) ---
     uint32_t       holdLoopCount        = 0;
@@ -199,6 +230,8 @@ void motorControlTask(void *parameter) {
                 pressBufFull        = false;
                 pressBufIdx         = 0;
                 settledPsi          = 0.0f;
+                rampCurrentSpeed    = 0.0f;
+                rampDescendComplete = false;
                 pidReset(&motorPid);
             }
             
@@ -219,43 +252,79 @@ void motorControlTask(void *parameter) {
             if (idleState == IDLE_STATE_PID_RAMP) {
                 idleRampLoopCount++;
 
-                // Apply fixed PowerPause hold speed — no PID
-                setMotorSpeed(ppHoldSpeed);
-                speed = ppHoldSpeed;
-                pidOut = (float)ppHoldSpeed;
+                // Descent phase: decrease speed at constant rate
+                if (!rampDescendComplete) {
+                    rampCurrentSpeed -= rampSpeedDecPerLoop;
+                    if (rampCurrentSpeed < (float)PP_HOLD_SPEED_MIN) {
+                        rampCurrentSpeed = (float)PP_HOLD_SPEED_MIN;
+                    }
+                }
+                speed = (uint16_t)rampCurrentSpeed;
+                setMotorSpeed(speed);
+                pidOut = rampCurrentSpeed;
                 lastSpeed = speed;
 
-                // Push pressure into ring buffer for stability detection
+                // Push pressure into ring buffer
+                // During descent:  used to detect trigger-pull (oldest vs current drop)
+                // During stability: used to detect pressure settled (max-min spread)
                 pressBuf[pressBufIdx] = smoothedPressure;
                 pressBufIdx = (pressBufIdx + 1) % PP_PRESSURE_STABLE_WINDOW;
                 if (pressBufIdx == 0) pressBufFull = true;
 
-                // --- Trigger-pull exit: after lockout, check for pressure drop ---
-                bool rampLoadExit = false;
-                if (idleRampLoopCount > idleRampLockoutLoops) {
-                    if (smoothedPressure < (IDLE_TARGET_PSI - IDLE_EXIT_DROP_PSI)) {
-                        rampLoadExit = true;
-                        Serial.printf("[PowerPause] RAMP exit by trigger: psi=%.2f\n", smoothedPressure);
-                    }
-                }
+                if (!rampDescendComplete) {
+                    // === Descent phase ===
 
-                if (rampLoadExit) {
-                    idleState           = IDLE_STATE_OFF;
-                    idleCounter         = 0;
-                    idleStableCounter   = 0;
-                    idleRampLoopCount   = 0;
-                    maxPressureRecorded = 0.0f;
-                    motorSteadyState    = false;
-                    steadyStateLogged   = false;
-                    pidSaturatedLogged  = false;
-                    speedBufFull        = false;
-                    speedBufIdx         = 0;
-                    pressBufFull        = false;
-                    pressBufIdx         = 0;
-                    settledPsi          = 0.0f;
-                    pidReset(&motorPid);
+                    // After lockout: check whether pressure is falling faster than the natural
+                    // ramp descent — if so, the user pulled the trigger.
+                    // Compare the oldest ring-buffer entry (pressBufIdx = next write slot in a
+                    // full buffer = oldest sample) against current pressure.
+                    bool rampLoadExit = false;
+                    if (idleRampLoopCount > idleRampLockoutLoops && pressBufFull) {
+                        float oldestPressure = pressBuf[pressBufIdx];
+                        float dropOverWindow = oldestPressure - smoothedPressure;
+                        if (dropOverWindow > PP_RAMP_TRIGGER_DROP_PSI) {
+                            rampLoadExit = true;
+                            Serial.printf("[PowerPause] RAMP trigger exit: drop=%.2f PSI in %.0f ms\n",
+                                          dropOverWindow,
+                                          PP_PRESSURE_STABLE_WINDOW * MOTOR_LOOP_INTERVAL_US / 1000.0f);
+                        }
+                    }
+
+                    if (rampLoadExit) {
+                        idleState           = IDLE_STATE_OFF;
+                        idleCounter         = 0;
+                        idleStableCounter   = 0;
+                        idleRampLoopCount   = 0;
+                        maxPressureRecorded = 0.0f;
+                        motorSteadyState    = false;
+                        steadyStateLogged   = false;
+                        pidSaturatedLogged  = false;
+                        speedBufFull        = false;
+                        speedBufIdx         = 0;
+                        pressBufFull        = false;
+                        pressBufIdx         = 0;
+                        settledPsi          = 0.0f;
+                        rampDescendComplete = false;
+                        pidReset(&motorPid);
+                    } else if (smoothedPressure < PP_RAMP_TARGET_PSI ||
+                               rampCurrentSpeed <= (float)PP_HOLD_SPEED_MIN) {
+                        // Pressure reached target (or hit the speed floor)
+                        rampDescendComplete = true;
+                        ppHoldSpeed = speed;
+                        // Push learned speed to shared data so display can read it
+                        portENTER_CRITICAL(&motorShared.mutex);
+                        motorShared.ppHoldSpeed = ppHoldSpeed;
+                        portEXIT_CRITICAL(&motorShared.mutex);
+                        // Reset ring buffer so stability detection starts clean
+                        pressBufFull      = false;
+                        pressBufIdx       = 0;
+                        idleStableCounter = 0;
+                        Serial.printf("[PowerPause] Descent complete: psi=%.2f at speed=%u\n",
+                                      smoothedPressure, ppHoldSpeed);
+                    }
                 } else {
-                    // --- Pressure stability detection ---
+                    // === Stability phase: speed locked, wait for pressure to settle ===
+
                     bool pressureNowStable = false;
                     float pressBufMean = 0.0f;
                     if (pressBufFull) {
@@ -278,17 +347,16 @@ void motorControlTask(void *parameter) {
                         idleStableCounter = 0;
                     }
 
-                    // Transition to HOLD when stable long enough, or on timeout
                     bool transitionToHold = false;
                     if (idleStableCounter >= ppPressureStableLoops && ppPressureStableLoops > 0) {
                         settledPsi = pressBufMean;
                         transitionToHold = true;
-                        Serial.printf("[PowerPause] RAMP stable: psi=%.2f (speed=%u)\n",
+                        Serial.printf("[PowerPause] Stable: psi=%.2f (speed=%u)\n",
                                       settledPsi, ppHoldSpeed);
                     } else if (idleRampLoopCount >= idleRampTimeoutLoops) {
                         settledPsi = smoothedPressure;
                         transitionToHold = true;
-                        Serial.printf("[PowerPause] RAMP timeout: psi=%.2f (speed=%u)\n",
+                        Serial.printf("[PowerPause] Stability timeout: psi=%.2f (speed=%u)\n",
                                       settledPsi, ppHoldSpeed);
                     }
 
@@ -366,23 +434,34 @@ void motorControlTask(void *parameter) {
                     lastSpeed = speed;
                     pidOut = 1000.0f;
 
-                    // Track peak pressure for deviation-based idle entry
-                    if (smoothedPressure > maxPressureRecorded) {
-                        maxPressureRecorded = smoothedPressure;
-                    }
-
-                    // Idle entry: pressure stays within MAX_PRESSURE_DEVIATION_PSI of the recorded peak
-                    if (smoothedPressure >= maxPressureRecorded - MAX_PRESSURE_DEVIATION_PSI) {
-                        if (idleCounter < idleEntryLoops) {
-                            idleCounter++;
+                    // Load detection: pressure below 7 PSI in MAX mode means the system
+                    // is under active spray load — drain counter and reset peak.
+                    if (smoothedPressure < MAX_MODE_LOAD_PSI_THRESHOLD) {
+                        if (idleCounter > IDLE_ENTRY_DECREASE) {
+                            idleCounter -= IDLE_ENTRY_DECREASE;
+                        } else {
+                            idleCounter = 0;
                         }
-                    } else if (idleCounter >= IDLE_ENTRY_DECREASE) {
-                        // Pressure deviated significantly — decrement counter slowly
-                        idleCounter -= IDLE_ENTRY_DECREASE;
-                    } else {
-                        // Large drop: reset peak and counter
-                        idleCounter = 0;
                         maxPressureRecorded = smoothedPressure;
+                    } else {
+                        // Track peak pressure for deviation-based idle entry
+                        if (smoothedPressure > maxPressureRecorded) {
+                            maxPressureRecorded = smoothedPressure;
+                        }
+
+                        // Idle entry: pressure stays within MAX_PRESSURE_DEVIATION_PSI of the recorded peak
+                        if (smoothedPressure >= maxPressureRecorded - MAX_PRESSURE_DEVIATION_PSI) {
+                            if (idleCounter < idleEntryLoops) {
+                                idleCounter++;
+                            }
+                        } else if (idleCounter >= IDLE_ENTRY_DECREASE) {
+                            // Pressure deviated significantly — decrement counter slowly
+                            idleCounter -= IDLE_ENTRY_DECREASE;
+                        } else {
+                            // Large drop: reset peak and counter
+                            idleCounter = 0;
+                            maxPressureRecorded = smoothedPressure;
+                        }
                     }
 
                     if (idleCounter >= idleEntryLoops && idleEntryLoops > 0) {
@@ -394,6 +473,8 @@ void motorControlTask(void *parameter) {
                         pressBufFull        = false;
                         pressBufIdx         = 0;
                         settledPsi          = 0.0f;
+                        rampCurrentSpeed    = (float)lastSpeed;
+                        rampDescendComplete = false;
                         pidReset(&motorPid);
                     }
                 } else {
@@ -516,36 +597,61 @@ void motorControlTask(void *parameter) {
                                     pidSaturatedLogged = true;
                                 }
 
-                                if (smoothedPressure > maxPressureRecorded) {
+                                // Mirror MAX-mode load detection: pressure below threshold
+                                // means the unit is actively spraying — drain counter.
+                                if (smoothedPressure < MAX_MODE_LOAD_PSI_THRESHOLD) {
                                     maxPressureRecorded = smoothedPressure;
-                                }
-
-                                if (smoothedPressure >= maxPressureRecorded - MAX_PRESSURE_DEVIATION_PSI) {
-                                    if (idleCounter < idleEntryLoops) {
-                                        idleCounter += IDLE_LOOP_INCREMENT;
-                                    }
-                                } else if (idleCounter >= IDLE_ENTRY_DECREASE) {
-                                    idleCounter -= IDLE_ENTRY_DECREASE;
-                                } else {
-                                    idleCounter = 0;
-                                    maxPressureRecorded = smoothedPressure;
-                                }
-                            } else {
-                                // Normal path: compare current speed against the rolling mean
-                                maxPressureRecorded  = 0.0f;
-                                pidSaturatedLogged   = false;
-                                float deviation = fabsf((float)speed - bufMean);
-                                if (deviation > spikeThreshold) {
-                                    // Spike detected — penalise counter
                                     if (idleCounter > IDLE_ENTRY_DECREASE) {
                                         idleCounter -= IDLE_ENTRY_DECREASE;
                                     } else {
                                         idleCounter = 0;
                                     }
                                 } else {
-                                    // Settled — count toward power pause
-                                    if (idleCounter < idleEntryLoops) {
-                                        idleCounter += IDLE_LOOP_INCREMENT;
+                                    if (smoothedPressure > maxPressureRecorded) {
+                                        maxPressureRecorded = smoothedPressure;
+                                    }
+
+                                    if (smoothedPressure >= maxPressureRecorded - MAX_PRESSURE_DEVIATION_PSI) {
+                                        if (idleCounter < idleEntryLoops) {
+                                            idleCounter += IDLE_LOOP_INCREMENT;
+                                        }
+                                    } else if (idleCounter >= IDLE_ENTRY_DECREASE) {
+                                        idleCounter -= IDLE_ENTRY_DECREASE;
+                                    } else {
+                                        idleCounter = 0;
+                                        maxPressureRecorded = smoothedPressure;
+                                    }
+                                }
+                            } else {
+                                // Normal path: speed is below saturation, so the load
+                                // threshold is meaningful — check it before spike detection.
+                                uint16_t loadThreshold = activeLoadThreshold(target);
+                                bool underLoad = (bufMean >= (float)loadThreshold);
+
+                                if (underLoad) {
+                                    maxPressureRecorded = 0.0f;
+                                    pidSaturatedLogged  = false;
+                                    if (idleCounter > IDLE_ENTRY_DECREASE) {
+                                        idleCounter -= IDLE_ENTRY_DECREASE;
+                                    } else {
+                                        idleCounter = 0;
+                                    }
+                                } else {
+                                    maxPressureRecorded  = 0.0f;
+                                    pidSaturatedLogged   = false;
+                                    float deviation = fabsf((float)speed - bufMean);
+                                    if (deviation > spikeThreshold) {
+                                        // Spike detected — penalise counter
+                                        if (idleCounter > IDLE_ENTRY_DECREASE) {
+                                            idleCounter -= IDLE_ENTRY_DECREASE;
+                                        } else {
+                                            idleCounter = 0;
+                                        }
+                                    } else {
+                                        // Settled — count toward power pause
+                                        if (idleCounter < idleEntryLoops) {
+                                            idleCounter += IDLE_LOOP_INCREMENT;
+                                        }
                                     }
                                 }
                             }
@@ -572,6 +678,8 @@ void motorControlTask(void *parameter) {
                             pressBufFull        = false;
                             pressBufIdx         = 0;
                             settledPsi          = 0.0f;
+                            rampCurrentSpeed    = (float)lastSpeed;
+                            rampDescendComplete = false;
                             pidReset(&motorPid);
                         }
                     }
@@ -607,6 +715,8 @@ void motorControlTask(void *parameter) {
             pressBufFull        = false;
             pressBufIdx         = 0;
             settledPsi          = 0.0f;
+            rampCurrentSpeed    = 0.0f;
+            rampDescendComplete = false;
 
             portENTER_CRITICAL(&motorShared.mutex);
             if (valid) {
@@ -634,6 +744,8 @@ void motorControlTask(void *parameter) {
             pressBufFull        = false;
             pressBufIdx         = 0;
             settledPsi          = 0.0f;
+            rampCurrentSpeed    = 0.0f;
+            rampDescendComplete = false;
 
             portENTER_CRITICAL(&motorShared.mutex);
             motorShared.motorSpeed = 0;

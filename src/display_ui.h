@@ -19,12 +19,7 @@ void drawRuntimeStatic(DisplayUnits units);
 void drawRuntimeTarget(float target, float current, DisplayUnits units, bool valid, bool forceRedraw = false, uint16_t motorSpeed = 0);
 void drawRuntimeMotorPower(uint16_t motorSpeed, bool forceRedraw = false);
 void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw = false);
-
-// Debug overlay — bottom-right info bar shows mains voltage instead of hours.
-// Compiled in only when DEBUG_MAINS_VOLTAGE != 0.
-#if DEBUG_MAINS_VOLTAGE
 void drawRuntimeMainsVoltage(float volts, bool forceRedraw = false);
-#endif
 void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw = false);
 void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, bool forceRedraw = false);
 void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining, bool forceRedraw = false);

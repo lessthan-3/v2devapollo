@@ -612,51 +612,48 @@ void drawRuntimeJobTime(uint32_t jobTimeSeconds, bool forceRedraw) {
   uint32_t hours   = jobTimeSeconds / 3600;
   uint32_t minutes = (jobTimeSeconds % 3600) / 60;
 
-  char buf[24];
-  snprintf(buf, sizeof(buf), "HOURS  %03lu:%02lu",
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%03lu:%02lu",
            (unsigned long)hours, (unsigned long)minutes);
 
-  static char lastBuf[24] = "";
+  static char lastBuf[16] = "";
   if (!forceRedraw && strcmp(buf, lastBuf) == 0) {
     return;
   }
   strncpy(lastBuf, buf, sizeof(lastBuf));
 
-  // Bottom zone — right half: hours
-  // Overdraw with background colour — no fillRect flash
+  // Bottom zone — middle third (160-319): job time, centred at x=240
+  // 6 chars × 12 px/char = 72 px → start at 240 - 36 = 204
   const int infoLineY = THIRD_2_Y + 22;
   tft.setTextFont(1);
   tft.setTextSize(2);
   tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
-  // Left edge sits ~1/8 screen (60px) right of centre
-  tft.setCursor(SCREEN_WIDTH / 2 + 60, infoLineY);
+  tft.setCursor(204, infoLineY);
   tft.print(buf);
   tft.setTextSize(1);
 }
 
-#if DEBUG_MAINS_VOLTAGE
 void drawRuntimeMainsVoltage(float volts, bool forceRedraw) {
   if (volts < 0.0f) volts = 0.0f;
 
-  char buf[24];
-  snprintf(buf, sizeof(buf), "MAINS %3.0f VAC ", volts);
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%3.0f VAC ", volts);
 
-  static char lastBuf[24] = "";
+  static char lastBuf[16] = "";
   if (!forceRedraw && strcmp(buf, lastBuf) == 0) {
     return;
   }
   strncpy(lastBuf, buf, sizeof(lastBuf));
 
-  // Bottom zone — right half: replaces HOURS in debug mode
+  // Bottom zone — right third (320-479): mains voltage
   const int infoLineY = THIRD_2_Y + 22;
   tft.setTextFont(1);
   tft.setTextSize(2);
   tft.setTextColor(COLOR_DEBUG, COLOR_BG);
-  tft.setCursor(SCREEN_WIDTH / 2 + 60, infoLineY);
+  tft.setCursor(326, infoLineY);
   tft.print(buf);
   tft.setTextSize(1);
 }
-#endif
 
 void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw) {
   // Build the display string first — compare before touching the display
@@ -701,13 +698,8 @@ void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw) {
   if (overTempShutdown)     tempTextColor = COLOR_TEMP_WARNING;
   else if (overTempWarning) tempTextColor = COLOR_WARNING;
   tft.setTextColor(tempTextColor, COLOR_BG);
-  // Right-align so the text ends ~1/8 screen (60px) from the centre divider
-  {
-    int16_t tw = (int16_t)(strlen(buf) * 12);  // ~12px per char at size 2
-    int16_t tx = (SCREEN_WIDTH / 2) - 60 - tw;
-    if (tx < 0) tx = 0;
-    tft.setCursor(tx, infoLineY);
-  }
+  // Left-aligned in left third (0-159)
+  tft.setCursor(4, infoLineY);
   tft.print(buf);
   tft.setTextSize(1);
 }

@@ -14,18 +14,6 @@
 #include "ota_update.h"
 
 // ---------------------------------------------------------------------------
-// Debug helpers
-// ---------------------------------------------------------------------------
-// When DEBUG_MAINS_VOLTAGE is enabled, the bottom-right info bar (normally
-// HOURS) shows the live mains voltage.  Use this macro everywhere a job-time
-// draw is needed so only one place needs to change when the flag is toggled.
-#if DEBUG_MAINS_VOLTAGE
-#define DRAW_BOTTOM_RIGHT(force) drawRuntimeMainsVoltage(currentMainsVoltage, (force))
-#else
-#define DRAW_BOTTOM_RIGHT(force) drawRuntimeJobTime(totalSystemTimeTenths * 360UL, (force))
-#endif
-
-// ---------------------------------------------------------------------------
 // Hardware instances
 // ---------------------------------------------------------------------------
 TFT_eSPI tft = TFT_eSPI();
@@ -89,9 +77,7 @@ bool        overTempWarning              = false;    // true when >= TEMP_WARN_S
 bool        overTempShutdown             = false;    // true when >= TEMP_SHUTDOWN_SETPOINT (restart required)
 unsigned long overTempWarnBuzzStart      = 0;        // millis() when warning buzz started (0 = not active)
 
-#if DEBUG_MAINS_VOLTAGE
 float       currentMainsVoltage         = 0.0f;     // Scaled mains voltage in VAC
-#endif
 
 // Screen / menu navigation
 ScreenState currentScreen           = SCREEN_STARTUP;
@@ -207,7 +193,8 @@ void enterRuntimeScreen(void) {
 
     drawRuntimeTarget(targetPsi, currentPsi, displayUnits, pressureValid, true);
     drawRuntimeMotorPower(0, true);
-    DRAW_BOTTOM_RIGHT(true);
+    drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+    drawRuntimeMainsVoltage(currentMainsVoltage, true);
     drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
 }
 
@@ -444,12 +431,10 @@ void setup() {
     analogSetPinAttenuation(TEMP_SENSOR_PIN, ADC_11db);
     tempSensorInit();
 
-#if DEBUG_MAINS_VOLTAGE
     // Mains voltage sensor (ADC) — 16V secondary through divider → 1V at 115V mains
     pinMode(VOLTAGE_SENSOR_PIN, INPUT);
     analogSetPinAttenuation(VOLTAGE_SENSOR_PIN, ADC_11db);
-    Serial.println("Mains voltage sensor initialised (DEBUG_MAINS_VOLTAGE)");
-#endif
+    Serial.println("Mains voltage sensor initialised");
 
     // Encoder button
     pinMode(ENCODER_BTN, INPUT_PULLUP);
@@ -1016,11 +1001,9 @@ void loop() {
         for (uint8_t i = 0; i < sampleCount; i++) tempSum += tempReadings[i];
         currentTemperatureC = tempSum / (float)sampleCount;
 
-#if DEBUG_MAINS_VOLTAGE
-        // Read mains voltage: analogReadMilliVolts gives mV; 1000 mV = 1 V = 115 V mains
+        // Read mains voltage: analogReadMilliVolts gives mV; 1000 mV = 1 V
         uint32_t adcMv = analogReadMilliVolts(VOLTAGE_SENSOR_PIN);
         currentMainsVoltage = (adcMv / 1000.0f) * VOLTAGE_MAINS_SCALE;
-#endif
 
         // --- SHUTDOWN level (266 F / 130 C) --- once set, requires restart to clear
         if (!overTempShutdown && currentTemperatureC >= TEMP_SHUTDOWN_SETPOINT) {
@@ -1085,7 +1068,8 @@ void loop() {
                 drawRuntimeStatic(displayUnits);
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed, true);
-                DRAW_BOTTOM_RIGHT(true);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+                drawRuntimeMainsVoltage(currentMainsVoltage, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             }
             // If we're transitioning INTO an idle state, force the overlay to
@@ -1102,7 +1086,8 @@ void loop() {
             drawRuntimeStatic(displayUnits);
             drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
             drawRuntimeMotorPower(displaySpeed, true);
-            DRAW_BOTTOM_RIGHT(true);
+            drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+            drawRuntimeMainsVoltage(currentMainsVoltage, true);
             drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
         }
 
@@ -1145,7 +1130,8 @@ void loop() {
                 drawRuntimeStatic(displayUnits);
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed, true);
-                DRAW_BOTTOM_RIGHT(true);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+                drawRuntimeMainsVoltage(currentMainsVoltage, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             } else if (overTempOverlayShown) {
                 // Still within on period — keep overlay fresh
@@ -1221,7 +1207,8 @@ void loop() {
                 drawRuntimeStatic(displayUnits);
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed, true);
-                DRAW_BOTTOM_RIGHT(true);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+                drawRuntimeMainsVoltage(currentMainsVoltage, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             }
         } else if (filterOverlayShown) {
@@ -1232,7 +1219,8 @@ void loop() {
                 drawRuntimeStatic(displayUnits);
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed, true);
-                DRAW_BOTTOM_RIGHT(true);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+                drawRuntimeMainsVoltage(currentMainsVoltage, true);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
             }
         }
@@ -1244,7 +1232,8 @@ void loop() {
             if (!anyOverlayShowing) {
                 drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, false, displaySpeed);
                 drawRuntimeMotorPower(displaySpeed);
-                DRAW_BOTTOM_RIGHT(false);
+                drawRuntimeJobTime(totalSystemTimeTenths * 360UL);
+                drawRuntimeMainsVoltage(currentMainsVoltage);
                 drawRuntimeTemperature(currentTemperatureC, displayUnits);
             }
         }

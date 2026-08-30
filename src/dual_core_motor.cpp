@@ -278,14 +278,29 @@ void motorControlTask(void *parameter) {
                     // ramp descent — if so, the user pulled the trigger.
                     // Compare the oldest ring-buffer entry (pressBufIdx = next write slot in a
                     // full buffer = oldest sample) against current pressure.
+                    // Note: no lockout guard — trigger detection takes priority over the
+                    // 2.8 PSI threshold check so a fast trigger pull can't be mistaken for
+                    // a natural descent completing.
+                    //
+                    // The threshold is linearly scaled by current pressure:
+                    //   ≥ 4.0 PSI  → 1.0× PP_RAMP_TRIGGER_DROP_PSI
+                    //   ≤ 2.8 PSI  → 0.5× PP_RAMP_TRIGGER_DROP_PSI
+                    // Tighter at low pressure where natural descent is slower and a
+                    // trigger pull produces a more obvious relative spike.
                     bool rampLoadExit = false;
-                    if (idleRampLoopCount > idleRampLockoutLoops && pressBufFull) {
+                    if (pressBufFull) {
+                        float clampedPsi = smoothedPressure;
+                        if (clampedPsi > 3.5f)            clampedPsi = 3.5f;
+                        if (clampedPsi < PP_RAMP_TARGET_PSI) clampedPsi = PP_RAMP_TARGET_PSI;
+                        float triggerScale = 1.0f - 0.15f * (3.5f - clampedPsi) / (3.5f - PP_RAMP_TARGET_PSI);
+                        float scaledTriggerThreshold = PP_RAMP_TRIGGER_DROP_PSI * triggerScale;
+
                         float oldestPressure = pressBuf[pressBufIdx];
                         float dropOverWindow = oldestPressure - smoothedPressure;
-                        if (dropOverWindow > PP_RAMP_TRIGGER_DROP_PSI) {
+                        if (dropOverWindow > scaledTriggerThreshold) {
                             rampLoadExit = true;
-                            Serial.printf("[PowerPause] RAMP trigger exit: drop=%.2f PSI in %.0f ms\n",
-                                          dropOverWindow,
+                            Serial.printf("[PowerPause] RAMP trigger exit: drop=%.2f PSI (threshold=%.2f) in %.0f ms\n",
+                                          dropOverWindow, scaledTriggerThreshold,
                                           PP_PRESSURE_STABLE_WINDOW * MOTOR_LOOP_INTERVAL_US / 1000.0f);
                         }
                     }
@@ -325,48 +340,70 @@ void motorControlTask(void *parameter) {
                 } else {
                     // === Stability phase: speed locked, wait for pressure to settle ===
 
-                    bool pressureNowStable = false;
-                    float pressBufMean = 0.0f;
-                    if (pressBufFull) {
-                        float minP = pressBuf[0], maxP = pressBuf[0];
-                        float sum  = 0.0f;
-                        for (uint8_t i = 0; i < PP_PRESSURE_STABLE_WINDOW; i++) {
-                            if (pressBuf[i] < minP) minP = pressBuf[i];
-                            if (pressBuf[i] > maxP) maxP = pressBuf[i];
-                            sum += pressBuf[i];
-                        }
-                        pressBufMean      = sum / PP_PRESSURE_STABLE_WINDOW;
-                        pressureNowStable = ((maxP - minP) <= PP_PRESSURE_STABLE_BAND_PSI);
-                    }
-
-                    if (pressureNowStable) {
-                        if (idleStableCounter < ppPressureStableLoops) {
-                            idleStableCounter++;
-                        }
+                    // Overpressure exit: if pressure climbed back above PP_RAMP_OVERPRESSURE_PSI
+                    // the descent stopped at the wrong speed (trigger likely pulled just as we
+                    // crossed 2.8 PSI). Exit immediately back to normal operation.
+                    if (smoothedPressure > PP_RAMP_OVERPRESSURE_PSI) {
+                        Serial.printf("[PowerPause] Stability overpressure exit: psi=%.2f\n", smoothedPressure);
+                        idleState           = IDLE_STATE_OFF;
+                        idleCounter         = 0;
+                        idleStableCounter   = 0;
+                        idleRampLoopCount   = 0;
+                        maxPressureRecorded = 0.0f;
+                        motorSteadyState    = false;
+                        steadyStateLogged   = false;
+                        pidSaturatedLogged  = false;
+                        speedBufFull        = false;
+                        speedBufIdx         = 0;
+                        pressBufFull        = false;
+                        pressBufIdx         = 0;
+                        settledPsi          = 0.0f;
+                        rampDescendComplete = false;
+                        pidReset(&motorPid);
                     } else {
-                        idleStableCounter = 0;
-                    }
+                        bool pressureNowStable = false;
+                        float pressBufMean = 0.0f;
+                        if (pressBufFull) {
+                            float minP = pressBuf[0], maxP = pressBuf[0];
+                            float sum  = 0.0f;
+                            for (uint8_t i = 0; i < PP_PRESSURE_STABLE_WINDOW; i++) {
+                                if (pressBuf[i] < minP) minP = pressBuf[i];
+                                if (pressBuf[i] > maxP) maxP = pressBuf[i];
+                                sum += pressBuf[i];
+                            }
+                            pressBufMean      = sum / PP_PRESSURE_STABLE_WINDOW;
+                            pressureNowStable = ((maxP - minP) <= PP_PRESSURE_STABLE_BAND_PSI);
+                        }
 
-                    bool transitionToHold = false;
-                    if (idleStableCounter >= ppPressureStableLoops && ppPressureStableLoops > 0) {
-                        settledPsi = pressBufMean;
-                        transitionToHold = true;
-                        Serial.printf("[PowerPause] Stable: psi=%.2f (speed=%u)\n",
-                                      settledPsi, ppHoldSpeed);
-                    } else if (idleRampLoopCount >= idleRampTimeoutLoops) {
-                        settledPsi = smoothedPressure;
-                        transitionToHold = true;
-                        Serial.printf("[PowerPause] Stability timeout: psi=%.2f (speed=%u)\n",
-                                      settledPsi, ppHoldSpeed);
-                    }
+                        if (pressureNowStable) {
+                            if (idleStableCounter < ppPressureStableLoops) {
+                                idleStableCounter++;
+                            }
+                        } else {
+                            idleStableCounter = 0;
+                        }
 
-                    if (transitionToHold) {
-                        idleState         = IDLE_STATE_HOLD;
-                        idleRampLoopCount = 0;
-                        idleStableCounter = 0;
-                        holdLoopCount     = 0;
-                        pressBufFull      = false;
-                        pressBufIdx       = 0;
+                        bool transitionToHold = false;
+                        if (idleStableCounter >= ppPressureStableLoops && ppPressureStableLoops > 0) {
+                            settledPsi = pressBufMean;
+                            transitionToHold = true;
+                            Serial.printf("[PowerPause] Stable: psi=%.2f (speed=%u)\n",
+                                          settledPsi, ppHoldSpeed);
+                        } else if (idleRampLoopCount >= idleRampTimeoutLoops) {
+                            settledPsi = smoothedPressure;
+                            transitionToHold = true;
+                            Serial.printf("[PowerPause] Stability timeout: psi=%.2f (speed=%u)\n",
+                                          settledPsi, ppHoldSpeed);
+                        }
+
+                        if (transitionToHold) {
+                            idleState         = IDLE_STATE_HOLD;
+                            idleRampLoopCount = 0;
+                            idleStableCounter = 0;
+                            holdLoopCount     = 0;
+                            pressBufFull      = false;
+                            pressBufIdx       = 0;
+                        }
                     }
                 }
             } else if (idleState == IDLE_STATE_HOLD) {

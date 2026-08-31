@@ -225,7 +225,7 @@
 #define PP_RAMP_SPEED_DEC_PER_SEC   100     // Speed units/second to decrease (100 = 10%/s)
 #define PP_RAMP_TARGET_PSI          2.8f    // Pressure target that ends the descent phase
 #define PP_RAMP_TRIGGER_DROP_PSI    0.4f    // Max PSI drop in the buffer window before trigger exit
-#define PP_RAMP_OVERPRESSURE_PSI    3.1f    // Pressure above this in stability phase → trigger-pull exit
+#define PP_RAMP_OVERPRESSURE_PSI    3.0f    // Pressure above this in stability phase → trigger-pull exit
 #define PP_SENSITIVITY_STEP     10      // 10% per encoder detent
 
 // Secret menu — max user-settable system hours

@@ -289,18 +289,14 @@ void motorControlTask(void *parameter) {
                     // trigger pull produces a more obvious relative spike.
                     bool rampLoadExit = false;
                     if (pressBufFull) {
-                        float clampedPsi = smoothedPressure;
-                        if (clampedPsi > 3.5f)            clampedPsi = 3.5f;
-                        if (clampedPsi < PP_RAMP_TARGET_PSI) clampedPsi = PP_RAMP_TARGET_PSI;
-                        float triggerScale = 1.0f - 0.15f * (3.5f - clampedPsi) / (3.5f - PP_RAMP_TARGET_PSI);
-                        float scaledTriggerThreshold = PP_RAMP_TRIGGER_DROP_PSI * triggerScale;
+                    
 
                         float oldestPressure = pressBuf[pressBufIdx];
                         float dropOverWindow = oldestPressure - smoothedPressure;
-                        if (dropOverWindow > scaledTriggerThreshold) {
+                        if (dropOverWindow > PP_RAMP_TRIGGER_DROP_PSI) {
                             rampLoadExit = true;
                             Serial.printf("[PowerPause] RAMP trigger exit: drop=%.2f PSI (threshold=%.2f) in %.0f ms\n",
-                                          dropOverWindow, scaledTriggerThreshold,
+                                          dropOverWindow, PP_RAMP_TRIGGER_DROP_PSI,
                                           PP_PRESSURE_STABLE_WINDOW * MOTOR_LOOP_INTERVAL_US / 1000.0f);
                         }
                     }
@@ -340,11 +336,27 @@ void motorControlTask(void *parameter) {
                 } else {
                     // === Stability phase: speed locked, wait for pressure to settle ===
 
-                    // Overpressure exit: if pressure climbed back above PP_RAMP_OVERPRESSURE_PSI
-                    // the descent stopped at the wrong speed (trigger likely pulled just as we
-                    // crossed 2.8 PSI). Exit immediately back to normal operation.
+                    // Evaluate exit conditions before stability detection.
+                    // Overpressure: descent stopped at the wrong speed (trigger at boundary).
+                    // Trigger drop: trigger was held through descent completion and pressure
+                    // keeps falling — same scaled detection as the descent phase.
+                    bool stabilityExitNow = false;
+
                     if (smoothedPressure > PP_RAMP_OVERPRESSURE_PSI) {
                         Serial.printf("[PowerPause] Stability overpressure exit: psi=%.2f\n", smoothedPressure);
+                        stabilityExitNow = true;
+                    } else if (pressBufFull) {
+
+                        float oldestPressure = pressBuf[pressBufIdx];
+                        float dropOverWindow = oldestPressure - smoothedPressure;
+                        if (dropOverWindow > PP_RAMP_TRIGGER_DROP_PSI) {
+                            Serial.printf("[PowerPause] Stability trigger exit: drop=%.2f PSI (threshold=%.2f)\n",
+                                          dropOverWindow, PP_RAMP_TRIGGER_DROP_PSI);
+                            stabilityExitNow = true;
+                        }
+                    }
+
+                    if (stabilityExitNow) {
                         idleState           = IDLE_STATE_OFF;
                         idleCounter         = 0;
                         idleStableCounter   = 0;

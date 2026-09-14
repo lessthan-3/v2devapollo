@@ -1168,13 +1168,12 @@ void drawSupportMenuScreen(uint8_t menuIndex) {
   // Divider
   tft.drawFastHLine(0, 50, SCREEN_WIDTH, COLOR_TEXT_PRIMARY);
 
-  const char* options[4] = {"Frequently Asked Questions", "Technical Information", "Contact Us", "Return To Main Menu"};
-  // 4 items from y=68, step=56: last item ends ~296, footer at 280 (items are clipped above footer)
-  const int startY  = 68;
-  const int stepY   = 56;
-  const int boxH    = 44;  // tall enough for size-3 text (24px) with 10px padding each side
+  const char* options[5] = {"Frequently Asked Questions", "Technical Information", "Contact Us", "Motor Test", "Return To Main Menu"};
+  const int startY  = 60;
+  const int stepY   = 48;
+  const int boxH    = 40;
 
-  for (uint8_t i = 0; i < 4; i++) {
+  for (uint8_t i = 0; i < 5; i++) {
     int y = startY + i * stepY;
     if (i == menuIndex) {
       tft.fillRect(0, y - 8, SCREEN_WIDTH, boxH, COLOR_MENU_SELECT);
@@ -1435,13 +1434,12 @@ void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion
 
 // ---------------------------------------------------------------------------
 // Secret menu — reached by turning the encoder 50 times on the About screen.
-// Options: 0=Set System Hours  1=PP Sensitivity  2=Motor Test  3=Return
+// Options: 0=Set System Hours  1=PP Sensitivity  2=Return
 // ---------------------------------------------------------------------------
 
-static const char* kSecretMenuLabels[4] = {
+static const char* kSecretMenuLabels[3] = {
     "Set System Hours",
     "PP Sensitivity",
-    "Motor Test",
     "Return"
 };
 
@@ -1462,7 +1460,7 @@ void drawSecretMenu(uint8_t selectedOption, bool forceRedraw) {
   const int ROW_H  = 52;
   const int ROW_Y0 = 56;
 
-  for (uint8_t i = 0; i < 4; i++) {
+  for (uint8_t i = 0; i < 3; i++) {
     int rowY = ROW_Y0 + i * ROW_H;
     bool sel = (i == selectedOption);
 

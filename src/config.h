@@ -261,7 +261,7 @@
 #define SETTINGS_OPTION_COUNT   5
 #define SETTINGS_OPTION_HEIGHT  44
 #define SETTINGS_TOP_Y          55
-#define SUPPORT_OPTION_COUNT    4
+#define SUPPORT_OPTION_COUNT    5
 #define MINMAX_FLASH_MS         500
 
 // Color theme
@@ -334,7 +334,9 @@
 // 16V AC transformer secondary → voltage divider → 1V at full (115V) mains.
 // Scale: 1V on ADC input = VOLTAGE_MAINS_SCALE V of mains.
 #define VOLTAGE_SENSOR_PIN      16      // IO16 - Mains voltage divider ADC input
-#define VOLTAGE_MAINS_SCALE     161.0f  // V_mains per V_adc (115 * 1.4 calibration factor)
+#define VOLTAGE_MAINS_SCALE     1.82f  // V_mains per V_adc (115 * 1.4 calibration factor)
+#define VOLTAGE_SAMPLE_INTERVAL_US 1000 // Sample the AC waveform every 1 ms
+#define VOLTAGE_PEAK_SAMPLE_COUNT   20  // One full 50 Hz cycle of samples
 
 // ============================================================================
 // Debug Flags

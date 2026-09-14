@@ -506,6 +506,7 @@ void setup() {
 void loop() {
     static unsigned long lastDisplayUpdate  = 0;
     static unsigned long lastTempRead       = 0;
+    static unsigned long lastVoltageSample  = 0;
     static unsigned long lastBeeperToggle   = 0;
     static bool          beeperOutput       = false;
     static float         smoothedPressure   = 0.0f;
@@ -514,6 +515,9 @@ void loop() {
     static IdleState     idleState          = IDLE_STATE_OFF;
     static IdleState     lastOverlayState   = IDLE_STATE_OFF;
     static uint16_t      motorSpeed         = 0;
+    static uint16_t      voltageReadings[VOLTAGE_PEAK_SAMPLE_COUNT] = {0};
+    static uint8_t       voltageSampleIndex = 0;
+    static uint8_t       voltageSampleCount = 0;
 
     // Read shared motor-task data
     {
@@ -724,7 +728,7 @@ void loop() {
             while (secretMenuScrollAccum >= 2)  { steps++;  secretMenuScrollAccum -= 2; }
             while (secretMenuScrollAccum <= -2) { steps--;  secretMenuScrollAccum += 2; }
             if (steps != 0) {
-                secretMenuIndex = (uint8_t)constrain((int32_t)secretMenuIndex + steps, 0, 3);
+                secretMenuIndex = (uint8_t)constrain((int32_t)secretMenuIndex + steps, 0, 2);
                 encoder.setCount(secretMenuIndex);
                 lastEncoderCount = encoder.getCount();
                 drawSecretMenu(secretMenuIndex);
@@ -829,7 +833,16 @@ void loop() {
                     case 0: enterSupportFaqScreen();     break;
                     case 1: enterSupportTechScreen();    break;
                     case 2: enterSupportContactScreen(); break;
-                    case 3: enterMenuScreen();           break;
+                    case 3:  // Motor Test — enter runtime at MAX pressure
+                        preMotorTestTargetPsi = targetPsi;  // save current setpoint for restore on exit
+                        motorTestActive       = true;
+                        motorTestStartTime    = millis();
+                        targetPsi             = MAX_PSI_THRESHOLD;
+                        enterRuntimeScreen();
+                        break;
+                    case 4:
+                        enterMenuScreen();
+                        break;
                 }
 
             } else if (currentScreen == SCREEN_SUPPORT_FAQ ||
@@ -866,14 +879,7 @@ void loop() {
                     case 1:  // PP Sensitivity
                         enterSecretSensitivity();
                         break;
-                    case 2:  // Motor Test — enter runtime at MAX pressure
-                        preMotorTestTargetPsi = targetPsi;  // save current setpoint for restore on exit
-                        motorTestActive       = true;
-                        motorTestStartTime    = millis();
-                        targetPsi             = MAX_PSI_THRESHOLD;
-                        enterRuntimeScreen();
-                        break;
-                    case 3:  // Return to About
+                    case 2:  // Return to About
                     default:
                         enterAboutScreen();
                         break;
@@ -1001,10 +1007,6 @@ void loop() {
         for (uint8_t i = 0; i < sampleCount; i++) tempSum += tempReadings[i];
         currentTemperatureC = tempSum / (float)sampleCount;
 
-        // Read mains voltage: analogReadMilliVolts gives mV; 1000 mV = 1 V
-        uint32_t adcMv = analogReadMilliVolts(VOLTAGE_SENSOR_PIN);
-        currentMainsVoltage = (adcMv / 1000.0f) * VOLTAGE_MAINS_SCALE;
-
         // --- SHUTDOWN level (266 F / 130 C) --- once set, requires restart to clear
         if (!overTempShutdown && currentTemperatureC >= TEMP_SHUTDOWN_SETPOINT) {
             overTempShutdown = true;
@@ -1034,6 +1036,34 @@ void loop() {
             overTempActive  = false;
             Serial.println("Temperature normal: warning cleared");
         }
+    }
+
+    // Sample the AC waveform frequently enough to capture its peak. The peak
+    // window covers a complete 50 Hz cycle, so it also covers 60 Hz mains.
+    uint32_t nowMicros = micros();
+    if ((uint32_t)(nowMicros - lastVoltageSample) >= VOLTAGE_SAMPLE_INTERVAL_US) {
+        lastVoltageSample = nowMicros;
+
+        uint32_t adcMv = analogReadMilliVolts(VOLTAGE_SENSOR_PIN);
+        voltageReadings[voltageSampleIndex] = (uint16_t)constrain(adcMv, 0UL, 65535UL);
+        voltageSampleIndex = (voltageSampleIndex + 1) % VOLTAGE_PEAK_SAMPLE_COUNT;
+        if (voltageSampleCount < VOLTAGE_PEAK_SAMPLE_COUNT) {
+            voltageSampleCount++;
+        }
+
+        uint16_t peakAdcMv = 0;
+        for (uint8_t i = 0; i < voltageSampleCount; i++) {
+            if (voltageReadings[i] > peakAdcMv) {
+                peakAdcMv = voltageReadings[i];
+            }
+        }
+
+        // analogReadMilliVolts gives mV; 1000 mV = 1 V.
+        currentMainsVoltage = (peakAdcMv / 10.0f) * VOLTAGE_MAINS_SCALE;
+
+        portENTER_CRITICAL(&motorShared.mutex);
+        motorShared.mainsVoltage = currentMainsVoltage;
+        portEXIT_CRITICAL(&motorShared.mutex);
     }
 
     // ------------------------------------------------------------------

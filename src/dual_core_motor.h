@@ -41,6 +41,7 @@ typedef struct {
     volatile int32_t  rawPressure;
     volatile float    smoothedPsi;
     volatile uint16_t motorSpeed;
+    volatile float    mainsVoltage;
     volatile float    pidOutput;
     volatile bool     pressureValid;
     volatile uint32_t idleSecondsRemaining;

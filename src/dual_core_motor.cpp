@@ -27,6 +27,7 @@ MotorSharedData motorShared = {
     .rawPressure = 0,
     .smoothedPsi = 0.0f,
     .motorSpeed = 0,
+    .mainsVoltage = 0.0f,
     .pidOutput = 0.0f,
     .pressureValid = false,
     .idleSecondsRemaining = UINT32_MAX,
@@ -66,25 +67,33 @@ static uint16_t calculateMaxSpeedFromTarget(float targetPsi) {
 /**
  * @brief Motor speed threshold above which the unit is under active spray load.
  *
- * Quadratic fit to characterised loaded-motor data (0-1000 speed units):
- *   speed = 17·psi² − 64·psi + 520
- *
- * Characterisation table (psi / unloaded% / loaded%):
- *   3 PSI → 42% / 46%  (threshold: ~48%, conservative)
- *   4 PSI → 48% / 54%
- *   5 PSI → 55% / 62%
- *   6 PSI → 62% / 74%
- *   7 PSI → 72% / 100%
- *
- * If the rolling mean motor speed meets or exceeds this threshold the unit is
- * considered to be under active spray demand and power-pause entry is suppressed.
+ * The base threshold is linearly interpolated from the loaded motor
+ * characterisation curve. It is shifted for mains voltage before comparison:
+ * adjustedThreshold = baseThreshold + 120 - peakVoltage.
  */
 static uint16_t activeLoadThreshold(float psi) {
-    if (psi < 3.0f) psi = 3.0f;
-    float t = 17.0f * psi * psi - 64.0f * psi + 520.0f;
-    if (t > 1000.0f) t = 1000.0f;
-    if (t < 0.0f)    t = 0.0f;
-    return (uint16_t)t;
+    static const float psiPoints[]    = {4.0f, 4.5f, 5.0f, 5.5f, 6.0f, 6.5f, 7.0f};
+    static const float loadedPoints[] = {48.0f, 52.0f, 56.0f, 60.0f, 65.0f, 74.0f, 90.0f};
+    constexpr size_t pointCount = sizeof(psiPoints) / sizeof(psiPoints[0]);
+
+    if (psi <= psiPoints[0]) {
+        return (uint16_t)lroundf(loadedPoints[0] * 10.0f);
+    }
+    if (psi >= psiPoints[pointCount - 1]) {
+        return (uint16_t)lroundf(loadedPoints[pointCount - 1] * 10.0f);
+    }
+
+    for (size_t i = 1; i < pointCount; i++) {
+        if (psi <= psiPoints[i]) {
+            float fraction = (psi - psiPoints[i - 1]) /
+                             (psiPoints[i] - psiPoints[i - 1]);
+            float thresholdPercent = loadedPoints[i - 1] +
+                                     fraction * (loadedPoints[i] - loadedPoints[i - 1]);
+            return (uint16_t)lroundf(thresholdPercent * 10.0f);
+        }
+    }
+
+    return (uint16_t)lroundf(loadedPoints[pointCount - 1] * 10.0f);
 }
 
 /**
@@ -170,6 +179,7 @@ void motorControlTask(void *parameter) {
         float newKp, newKi, newKd;
         float idleEntryDeviation = IDLE_ENTRY_DEVIATION_PSI;
         float target = 0.0f;
+        float mainsVoltage = 0.0f;
         bool enabled = false;
         uint16_t idleEntrySeconds = IDLE_ENTRY_SECONDS;
         float spikeMultiplier = 1.0f;
@@ -191,6 +201,7 @@ void motorControlTask(void *parameter) {
         }
         target = motorShared.targetPsi;
         enabled = motorShared.motorEnabled;
+        mainsVoltage = motorShared.mainsVoltage;
         idleEntryDeviation = motorShared.idleEntryDeviationPsi;
         idleEntrySeconds = motorShared.idleEntrySeconds;
         spikeMultiplier = motorShared.spikeMultiplier;
@@ -674,8 +685,9 @@ void motorControlTask(void *parameter) {
                             } else {
                                 // Normal path: speed is below saturation, so the load
                                 // threshold is meaningful — check it before spike detection.
-                                uint16_t loadThreshold = activeLoadThreshold(target);
-                                bool underLoad = (bufMean >= (float)loadThreshold);
+                                float loadThreshold = (float)activeLoadThreshold(target) +
+                                                       60.0f - mainsVoltage/2.0f;
+                                bool underLoad = (bufMean >= loadThreshold);
 
                                 if (underLoad) {
                                     maxPressureRecorded = 0.0f;

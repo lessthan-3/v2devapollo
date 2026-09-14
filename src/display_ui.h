@@ -33,7 +33,7 @@ void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, 
 void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion, bool confirmVisible = false);
 
 // Secret menu (reached by turning the encoder 50 times on the About screen)
-void drawSecretMenu(uint8_t selectedOption, bool forceRedraw = false);           // 0=Set Hours 1=PP Sensitivity 2=Motor Test 3=Return
+void drawSecretMenu(uint8_t selectedOption, bool forceRedraw = false);           // 0=Set Hours 1=PP Sensitivity 2=Return
 void drawSecretSetHoursScreen(uint32_t hours, bool forceRedraw = false);         // Encoder-set system hours
 void drawSecretSensitivityScreen(uint16_t sensitivityPct, bool forceRedraw = false);  // PP sensitivity %
 

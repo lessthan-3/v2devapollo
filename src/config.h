@@ -337,6 +337,8 @@
 #define VOLTAGE_MAINS_SCALE     1.82f  // V_mains per V_adc (115 * 1.4 calibration factor)
 #define VOLTAGE_SAMPLE_INTERVAL_US 1000 // Sample the AC waveform every 1 ms
 #define VOLTAGE_PEAK_SAMPLE_COUNT   20  // One full 50 Hz cycle of samples
+#define VOLTAGE_OUTLIER_COUNT        3  // Discard the highest isolated spike
+#define VOLTAGE_CREST_AVERAGE_COUNT  5  // Average the next-highest crest samples
 
 // ============================================================================
 // Debug Flags

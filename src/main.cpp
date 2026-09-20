@@ -1051,15 +1051,36 @@ void loop() {
             voltageSampleCount++;
         }
 
-        uint16_t peakAdcMv = 0;
+        // Estimate the AC crest while rejecting one-off ADC spikes. Sorting a
+        // copy keeps the rolling sample buffer intact; use the next three
+        // highest readings after dropping the single highest reading.
+        uint16_t sortedVoltageReadings[VOLTAGE_PEAK_SAMPLE_COUNT];
         for (uint8_t i = 0; i < voltageSampleCount; i++) {
-            if (voltageReadings[i] > peakAdcMv) {
-                peakAdcMv = voltageReadings[i];
+            sortedVoltageReadings[i] = voltageReadings[i];
+        }
+        for (uint8_t i = 1; i < voltageSampleCount; i++) {
+            uint16_t value = sortedVoltageReadings[i];
+            uint8_t j = i;
+            while (j > 0 && sortedVoltageReadings[j - 1] < value) {
+                sortedVoltageReadings[j] = sortedVoltageReadings[j - 1];
+                j--;
             }
+            sortedVoltageReadings[j] = value;
         }
 
+        uint8_t discardCount = min((uint8_t)VOLTAGE_OUTLIER_COUNT, voltageSampleCount);
+        uint8_t crestSampleCount = min((uint8_t)VOLTAGE_CREST_AVERAGE_COUNT,
+                                       (uint8_t)(voltageSampleCount - discardCount));
+        uint32_t crestSum = 0;
+        for (uint8_t i = 0; i < crestSampleCount; i++) {
+            crestSum += sortedVoltageReadings[discardCount + i];
+        }
+        uint16_t crestAdcMv = crestSampleCount > 0
+                            ? (uint16_t)(crestSum / crestSampleCount)
+                            : 0;
+
         // analogReadMilliVolts gives mV; 1000 mV = 1 V.
-        currentMainsVoltage = (peakAdcMv / 10.0f) * VOLTAGE_MAINS_SCALE;
+        currentMainsVoltage = (crestAdcMv / 10.0f) * VOLTAGE_MAINS_SCALE;
 
         portENTER_CRITICAL(&motorShared.mutex);
         motorShared.mainsVoltage = currentMainsVoltage;

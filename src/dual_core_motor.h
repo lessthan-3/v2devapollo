@@ -19,6 +19,15 @@ typedef enum {
 } IdleState;
 
 typedef enum {
+    POWERPAUSE_EXIT_NONE = 0,
+    POWERPAUSE_EXIT_MANUAL,
+    POWERPAUSE_EXIT_RAMP_TRIGGER,
+    POWERPAUSE_EXIT_OVERPRESSURE,
+    POWERPAUSE_EXIT_STABILITY_TRIGGER,
+    POWERPAUSE_EXIT_HOLD_PRESSURE
+} PowerPauseExitReason;
+
+typedef enum {
     UNITS_IMPERIAL = 0,
     UNITS_METRIC   = 1
 } DisplayUnits;
@@ -59,6 +68,12 @@ typedef struct {
     volatile uint16_t ppHoldSpeed;
     // Set by motor task when ppHoldSpeed changes; cleared by display task after saving to flash.
     volatile bool     ppSpeedSaveRequest;
+
+    // Debug event latched by the motor task and consumed by the display task.
+    volatile uint32_t powerPauseExitEvent;
+    volatile uint8_t  powerPauseExitReason;
+    volatile float    powerPauseExitValue;
+    volatile float    powerPauseExitReference;
 
     portMUX_TYPE mutex;
 } MotorSharedData;

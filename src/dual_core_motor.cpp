@@ -40,6 +40,10 @@ MotorSharedData motorShared = {
     .spikeMultiplier = 1.0f,
     .ppHoldSpeed = PP_HOLD_SPEED_DEFAULT,
     .ppSpeedSaveRequest = false,
+    .powerPauseExitEvent = 0,
+    .powerPauseExitReason = POWERPAUSE_EXIT_NONE,
+    .powerPauseExitValue = 0.0f,
+    .powerPauseExitReference = 0.0f,
     .mutex = portMUX_INITIALIZER_UNLOCKED
 };
 
@@ -50,6 +54,15 @@ TaskHandle_t getMotorTaskHandle(void) { return motorTaskHandle; }
 
 // Local PID controller for motor task
 static PidController motorPid;
+
+static void publishPowerPauseExit(PowerPauseExitReason reason, float value, float reference) {
+    portENTER_CRITICAL(&motorShared.mutex);
+    motorShared.powerPauseExitReason = reason;
+    motorShared.powerPauseExitValue = value;
+    motorShared.powerPauseExitReference = reference;
+    motorShared.powerPauseExitEvent++;
+    portEXIT_CRITICAL(&motorShared.mutex);
+}
 
 static uint16_t calculateMaxSpeedFromTarget(float targetPsi) {
     if (targetPsi <= 3.0f) {
@@ -228,6 +241,7 @@ void motorControlTask(void *parameter) {
                                ((1.0f - smoothingAlpha) * smoothedPressure);
 
             if (idleExitRequested && idleState != IDLE_STATE_OFF) {
+                publishPowerPauseExit(POWERPAUSE_EXIT_MANUAL, smoothedPressure, (float)idleState);
                 idleState           = IDLE_STATE_OFF;
                 idleCounter         = 0;
                 idleStableCounter   = 0;
@@ -299,11 +313,12 @@ void motorControlTask(void *parameter) {
                     // Tighter at low pressure where natural descent is slower and a
                     // trigger pull produces a more obvious relative spike.
                     bool rampLoadExit = false;
+                    float dropOverWindow = 0.0f;
                     if (pressBufFull) {
                     
 
                         float oldestPressure = pressBuf[pressBufIdx];
-                        float dropOverWindow = oldestPressure - smoothedPressure;
+                        dropOverWindow = oldestPressure - smoothedPressure;
                         if (dropOverWindow > PP_RAMP_TRIGGER_DROP_PSI) {
                             rampLoadExit = true;
                             Serial.printf("[PowerPause] RAMP trigger exit: drop=%.2f PSI (threshold=%.2f) in %.0f ms\n",
@@ -313,6 +328,8 @@ void motorControlTask(void *parameter) {
                     }
 
                     if (rampLoadExit) {
+                        publishPowerPauseExit(POWERPAUSE_EXIT_RAMP_TRIGGER,
+                                              dropOverWindow, PP_RAMP_TRIGGER_DROP_PSI);
                         idleState           = IDLE_STATE_OFF;
                         idleCounter         = 0;
                         idleStableCounter   = 0;
@@ -352,10 +369,16 @@ void motorControlTask(void *parameter) {
                     // Trigger drop: trigger was held through descent completion and pressure
                     // keeps falling — same scaled detection as the descent phase.
                     bool stabilityExitNow = false;
+                    PowerPauseExitReason stabilityExitReason = POWERPAUSE_EXIT_NONE;
+                    float stabilityExitValue = 0.0f;
+                    float stabilityExitReference = 0.0f;
 
                     if (smoothedPressure > PP_RAMP_OVERPRESSURE_PSI) {
                         Serial.printf("[PowerPause] Stability overpressure exit: psi=%.2f\n", smoothedPressure);
                         stabilityExitNow = true;
+                        stabilityExitReason = POWERPAUSE_EXIT_OVERPRESSURE;
+                        stabilityExitValue = smoothedPressure;
+                        stabilityExitReference = PP_RAMP_OVERPRESSURE_PSI;
                     } else if (pressBufFull) {
 
                         float oldestPressure = pressBuf[pressBufIdx];
@@ -364,10 +387,14 @@ void motorControlTask(void *parameter) {
                             Serial.printf("[PowerPause] Stability trigger exit: drop=%.2f PSI (threshold=%.2f)\n",
                                           dropOverWindow, PP_RAMP_TRIGGER_DROP_PSI);
                             stabilityExitNow = true;
+                            stabilityExitReason = POWERPAUSE_EXIT_STABILITY_TRIGGER;
+                            stabilityExitValue = dropOverWindow;
+                            stabilityExitReference = PP_RAMP_TRIGGER_DROP_PSI;
                         }
                     }
 
                     if (stabilityExitNow) {
+                        publishPowerPauseExit(stabilityExitReason, stabilityExitValue, stabilityExitReference);
                         idleState           = IDLE_STATE_OFF;
                         idleCounter         = 0;
                         idleStableCounter   = 0;
@@ -443,6 +470,8 @@ void motorControlTask(void *parameter) {
                 if (holdLoopCount > ppHoldLockoutLoops) {
                     bool holdExitByPressure = (smoothedPressure < (settledPsi - IDLE_EXIT_DROP_PSI));
                     if (holdExitByPressure) {
+                        publishPowerPauseExit(POWERPAUSE_EXIT_HOLD_PRESSURE,
+                                              smoothedPressure, settledPsi - IDLE_EXIT_DROP_PSI);
                         Serial.printf("[PowerPause] HOLD exit: psi=%.2f, settled=%.2f\n",
                                       smoothedPressure, settledPsi);
 

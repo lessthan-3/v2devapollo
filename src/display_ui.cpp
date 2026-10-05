@@ -921,6 +921,33 @@ void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining
   tft.setTextSize(1);
 }
 
+void drawRuntimeDebugPopup(const char* message) {
+  tft.fillScreen(TFT_BLACK);
+  tft.setTextColor(TFT_YELLOW, TFT_BLACK);
+  tft.setFreeFont(nullptr);
+  tft.setTextSize(3);
+  tft.setCursor(16, 35);
+  tft.print("POWERPAUSE DEBUG");
+
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.setTextSize(2);
+  int y = 105;
+  const char* lineStart = message;
+  while (lineStart != nullptr && *lineStart != '\0') {
+    const char* newline = strchr(lineStart, '\n');
+    int lineLength = newline != nullptr ? (int)(newline - lineStart) : (int)strlen(lineStart);
+    char line[48];
+    lineLength = min(lineLength, (int)sizeof(line) - 1);
+    memcpy(line, lineStart, lineLength);
+    line[lineLength] = '\0';
+    tft.setCursor(16, y);
+    tft.print(line);
+    y += 28;
+    lineStart = newline != nullptr ? newline + 1 : nullptr;
+  }
+  tft.setTextSize(1);
+}
+
 // ---------------------------------------------------------------------------
 // Over-temperature WARNING overlay (>= 230 F): motor keeps running
 // Matches the reference design: red banner top, white message bottom
@@ -1434,12 +1461,13 @@ void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion
 
 // ---------------------------------------------------------------------------
 // Secret menu — reached by turning the encoder 50 times on the About screen.
-// Options: 0=Set System Hours  1=PP Sensitivity  2=Return
+// Options: 0=Set System Hours  1=PP Sensitivity  2=Voltage Calibration  3=Return
 // ---------------------------------------------------------------------------
 
-static const char* kSecretMenuLabels[3] = {
+static const char* kSecretMenuLabels[4] = {
     "Set System Hours",
     "PP Sensitivity",
+  "Voltage Calibration",
     "Return"
 };
 
@@ -1460,7 +1488,7 @@ void drawSecretMenu(uint8_t selectedOption, bool forceRedraw) {
   const int ROW_H  = 52;
   const int ROW_Y0 = 56;
 
-  for (uint8_t i = 0; i < 3; i++) {
+  for (uint8_t i = 0; i < 4; i++) {
     int rowY = ROW_Y0 + i * ROW_H;
     bool sel = (i == selectedOption);
 
@@ -1553,6 +1581,50 @@ void drawSecretSensitivityScreen(uint16_t sensitivityPct, bool forceRedraw) {
   const char* hint = "Rotate to adjust  Press to save";
   tft.setCursor((SCREEN_WIDTH - (int)strlen(hint) * 12) / 2, SCREEN_HEIGHT - 28);
   tft.print(hint);
+}
+
+void drawSecretVoltageCalibrationScreen(float calibrationFactor, float measuredVoltage,
+                                         bool forceRedraw) {
+  if (forceRedraw) {
+    tft.fillScreen(COLOR_BG);
+
+    tft.setTextColor((uint16_t)COLOR_ERROR, COLOR_BG);
+    tft.setTextSize(3);
+    const char* title = "VOLTAGE CALIBRATION";
+    tft.setCursor((SCREEN_WIDTH - (int)strlen(title) * 18) / 2, 12);
+    tft.print(title);
+    tft.drawFastHLine(0, 46, SCREEN_WIDTH, (uint16_t)COLOR_ERROR);
+
+    tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+    tft.setTextSize(2);
+    const char* desc = "Adjust to a trusted meter reading";
+    tft.setCursor((SCREEN_WIDTH - (int)strlen(desc) * 12) / 2, 62);
+    tft.print(desc);
+
+    const char* hint = "Rotate to adjust  Press to save";
+    tft.setCursor((SCREEN_WIDTH - (int)strlen(hint) * 12) / 2, SCREEN_HEIGHT - 28);
+    tft.print(hint);
+  }
+
+  // Clear only the changing fields. Fixed regions prevent old digits from
+  // remaining when the number of characters changes.
+  tft.fillRect(90, 100, 300, 70, COLOR_BG);
+  char voltageBuf[20];
+  snprintf(voltageBuf, sizeof(voltageBuf), "%.1f VAC", measuredVoltage);
+  tft.setTextColor(COLOR_TEXT_SECRET, COLOR_BG);
+  tft.setTextSize(6);
+  int voltageWidth = (int)strlen(voltageBuf) * 36;
+  tft.setCursor((SCREEN_WIDTH - voltageWidth) / 2, 108);
+  tft.print(voltageBuf);
+
+  tft.fillRect(150, 182, 180, 30, COLOR_BG);
+  char factorBuf[24];
+  snprintf(factorBuf, sizeof(factorBuf), "Scale: %.0f%%", calibrationFactor * 100.0f);
+  tft.setTextColor(COLOR_TEXT_SECONDARY, COLOR_BG);
+  tft.setTextSize(2);
+  int factorWidth = (int)strlen(factorBuf) * 12;
+  tft.setCursor((SCREEN_WIDTH - factorWidth) / 2, 190);
+  tft.print(factorBuf);
 }
 
 // ---------------------------------------------------------------------------

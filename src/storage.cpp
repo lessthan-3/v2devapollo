@@ -118,6 +118,7 @@ void loadSettings(void) {
         lightThemeEnabled       = prefs.getBool("lightTheme",  false);
         powerPauseSensitivityPct = prefs.getUShort("ppSensPct", PP_SENSITIVITY_DEFAULT);
         powerPauseHoldSpeed     = prefs.getUShort("ppSpeed",   PP_HOLD_SPEED_DEFAULT);
+        voltageCalibrationFactor = prefs.getFloat("voltCal", 1.0f);
         prefs.end();
     } else {
         prefs.end();
@@ -126,6 +127,7 @@ void loadSettings(void) {
         powerPauseBeeperEnabled = true;
         powerPauseSensitivityPct = PP_SENSITIVITY_DEFAULT;
         powerPauseHoldSpeed     = PP_HOLD_SPEED_DEFAULT;
+        voltageCalibrationFactor = 1.0f;
     }
 
     // Target pressure always boots at 0 — not persisted
@@ -136,6 +138,9 @@ void loadSettings(void) {
     powerPauseSeconds = constrain(powerPauseSeconds, POWER_PAUSE_SEC_MIN, POWER_PAUSE_SEC_MAX);
     powerPauseSensitivityPct = constrain(powerPauseSensitivityPct, (uint16_t)PP_SENSITIVITY_MIN, (uint16_t)PP_SENSITIVITY_MAX);
     powerPauseHoldSpeed = constrain(powerPauseHoldSpeed, (uint16_t)PP_HOLD_SPEED_MIN, (uint16_t)PP_HOLD_SPEED_MAX);
+    voltageCalibrationFactor = constrain(voltageCalibrationFactor,
+                                         VOLTAGE_CALIBRATION_MIN,
+                                         VOLTAGE_CALIBRATION_MAX);
 
     // Push to motor task
     setIdleEntryDeviationSafe(settingsIdleDev);
@@ -153,6 +158,7 @@ void saveSettings(void) {
         prefs.putBool("lightTheme",  lightThemeEnabled);
         prefs.putUShort("ppSensPct", powerPauseSensitivityPct);
         prefs.putUShort("ppSpeed",   powerPauseHoldSpeed);
+        prefs.putFloat("voltCal",    voltageCalibrationFactor);
         prefs.end();
     } else {
         prefs.end();

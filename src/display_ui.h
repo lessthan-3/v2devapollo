@@ -23,6 +23,7 @@ void drawRuntimeMainsVoltage(float volts, bool forceRedraw = false);
 void drawRuntimeTemperature(float tempC, DisplayUnits units, bool forceRedraw = false);
 void drawRuntimeSensorPressureDebug(float rawPsi, int32_t rawValue, bool valid, bool forceRedraw = false);
 void drawRuntimePowerPauseOverlay(IdleState idleState, uint32_t secondsRemaining, bool forceRedraw = false);
+void drawRuntimeDebugPopup(const char* message);
 void drawRuntimeOverTempOverlay(float tempC, bool forceRedraw = false);
 void drawRuntimeFilterWarningOverlay(void);
 void drawSupportMenuScreen(uint8_t menuIndex);
@@ -33,9 +34,11 @@ void drawTimersScreen(uint32_t totalRuntimeTenths, uint32_t totalJobTimeTenths, 
 void drawAboutScreen(uint32_t totalSystemTimeTenths, const char* firmwareVersion, bool confirmVisible = false);
 
 // Secret menu (reached by turning the encoder 50 times on the About screen)
-void drawSecretMenu(uint8_t selectedOption, bool forceRedraw = false);           // 0=Set Hours 1=PP Sensitivity 2=Return
+void drawSecretMenu(uint8_t selectedOption, bool forceRedraw = false);           // 0=Set Hours 1=PP Sensitivity 2=Voltage Calibration 3=Return
 void drawSecretSetHoursScreen(uint32_t hours, bool forceRedraw = false);         // Encoder-set system hours
 void drawSecretSensitivityScreen(uint16_t sensitivityPct, bool forceRedraw = false);  // PP sensitivity %
+void drawSecretVoltageCalibrationScreen(float calibrationFactor, float measuredVoltage,
+                                        bool forceRedraw = false);
 
 // OTA Update screen
 #include "ota_update.h"

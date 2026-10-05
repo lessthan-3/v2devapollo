@@ -36,7 +36,8 @@ typedef enum {
     SCREEN_OTA,
     SCREEN_SECRET_MENU,
     SCREEN_SECRET_SET_HOURS,
-    SCREEN_SECRET_PP_SENSITIVITY
+    SCREEN_SECRET_PP_SENSITIVITY,
+    SCREEN_SECRET_VOLTAGE_CALIBRATION
 } ScreenState;
 
 // ---------------------------------------------------------------------------
@@ -58,6 +59,7 @@ uint16_t    powerPauseSensitivityPct = PP_SENSITIVITY_DEFAULT;
 
 // Power-pause hold speed (hidden, self-adjusting) — persisted to flash
 uint16_t    powerPauseHoldSpeed      = PP_HOLD_SPEED_DEFAULT;
+float       voltageCalibrationFactor = 1.0f;
 
 // Motor test mode — tracks active test so PSI can be restored on exit
 bool          motorTestActive        = false;
@@ -103,6 +105,9 @@ uint32_t    secretEditHours         = 0;     // hours being edited on Set Hours 
 int32_t     secretHoursScrollAccum  = 0;
 uint16_t    secretSensitivityPct    = PP_SENSITIVITY_DEFAULT;
 int32_t     secretSensScrollAccum   = 0;
+float       secretVoltageCalibration = 1.0f;
+float       secretVoltageReference   = 0.0f;
+int32_t     secretVoltageScrollAccum = 0;
 
 // Timers screen
 uint8_t     timersIndex             = 0;
@@ -134,6 +139,7 @@ void enterAboutScreen(void);
 void enterSecretMenu(void);
 void enterSecretSetHours(void);
 void enterSecretSensitivity(void);
+void enterSecretVoltageCalibration(void);
 void syncPowerPauseSettings(bool saveToNvs);
 
 // ---------------------------------------------------------------------------
@@ -287,6 +293,18 @@ void enterSecretSensitivity(void) {
     encoder.setCount((int64_t)(secretSensitivityPct / PP_SENSITIVITY_STEP));
     lastEncoderCount = encoder.getCount();
     drawSecretSensitivityScreen(secretSensitivityPct, true);
+}
+
+void enterSecretVoltageCalibration(void) {
+    currentScreen = SCREEN_SECRET_VOLTAGE_CALIBRATION;
+    secretVoltageCalibration = voltageCalibrationFactor;
+    secretVoltageReference = (voltageCalibrationFactor > 0.0f)
+                           ? currentMainsVoltage / voltageCalibrationFactor
+                           : currentMainsVoltage;
+    secretVoltageScrollAccum = 0;
+    encoder.setCount((int64_t)lroundf(secretVoltageCalibration / VOLTAGE_CALIBRATION_STEP));
+    lastEncoderCount = encoder.getCount();
+    drawSecretVoltageCalibrationScreen(secretVoltageCalibration, currentMainsVoltage, true);
 }
 
 void enterOtaScreen(void) {
@@ -518,6 +536,9 @@ void loop() {
     static uint16_t      voltageReadings[VOLTAGE_PEAK_SAMPLE_COUNT] = {0};
     static uint8_t       voltageSampleIndex = 0;
     static uint8_t       voltageSampleCount = 0;
+    static uint32_t      lastPowerPauseExitEvent = 0;
+    static unsigned long powerPauseDebugPopupUntil = 0;
+    static char          powerPauseDebugMessage[96] = {};
 
     // Read shared motor-task data
     {
@@ -527,7 +548,35 @@ void loop() {
         idleSecondsRemaining = motorShared.idleSecondsRemaining;
         idleState            = (IdleState)motorShared.idleState;
         motorSpeed           = motorShared.motorSpeed;
+#if DEBUG_POWERPAUSE_EXIT_POPUP
+        uint32_t exitEvent = motorShared.powerPauseExitEvent;
+        PowerPauseExitReason exitReason = (PowerPauseExitReason)motorShared.powerPauseExitReason;
+        float exitValue = motorShared.powerPauseExitValue;
+        float exitReference = motorShared.powerPauseExitReference;
+#endif
         portEXIT_CRITICAL(&motorShared.mutex);
+
+#if DEBUG_POWERPAUSE_EXIT_POPUP
+        if (exitEvent != lastPowerPauseExitEvent) {
+            lastPowerPauseExitEvent = exitEvent;
+            const char* reason = "UNKNOWN";
+            switch (exitReason) {
+                case POWERPAUSE_EXIT_MANUAL:            reason = "MANUAL DIAL / BUTTON"; break;
+                case POWERPAUSE_EXIT_RAMP_TRIGGER:      reason = "RAMP TRIGGER LOAD"; break;
+                case POWERPAUSE_EXIT_OVERPRESSURE:      reason = "RAMP OVERPRESSURE"; break;
+                case POWERPAUSE_EXIT_STABILITY_TRIGGER: reason = "STABILITY TRIGGER LOAD"; break;
+                case POWERPAUSE_EXIT_HOLD_PRESSURE:    reason = "HOLD PRESSURE DROP"; break;
+                default: break;
+            }
+            snprintf(powerPauseDebugMessage, sizeof(powerPauseDebugMessage),
+                     "EXIT: %s\nvalue: %.2f\nreference: %.2f",
+                     reason, exitValue, exitReference);
+            powerPauseDebugPopupUntil = millis() + 2500UL;
+            if (currentScreen == SCREEN_RUNTIME) {
+                drawRuntimeDebugPopup(powerPauseDebugMessage);
+            }
+        }
+#endif
     }
 
     // Poll for PowerPause hold-speed save request (motor task → flash)
@@ -728,7 +777,7 @@ void loop() {
             while (secretMenuScrollAccum >= 2)  { steps++;  secretMenuScrollAccum -= 2; }
             while (secretMenuScrollAccum <= -2) { steps--;  secretMenuScrollAccum += 2; }
             if (steps != 0) {
-                secretMenuIndex = (uint8_t)constrain((int32_t)secretMenuIndex + steps, 0, 2);
+                secretMenuIndex = (uint8_t)constrain((int32_t)secretMenuIndex + steps, 0, 3);
                 encoder.setCount(secretMenuIndex);
                 lastEncoderCount = encoder.getCount();
                 drawSecretMenu(secretMenuIndex);
@@ -760,6 +809,25 @@ void loop() {
                 encoder.setCount((int64_t)(secretSensitivityPct / PP_SENSITIVITY_STEP));
                 lastEncoderCount = encoder.getCount();
                 drawSecretSensitivityScreen(secretSensitivityPct);
+            }
+        } else if (currentScreen == SCREEN_SECRET_VOLTAGE_CALIBRATION) {
+            secretVoltageScrollAccum += (int32_t)delta;
+            int32_t steps = 0;
+            while (secretVoltageScrollAccum >= 2)  { steps++;  secretVoltageScrollAccum -= 2; }
+            while (secretVoltageScrollAccum <= -2) { steps--;  secretVoltageScrollAccum += 2; }
+            if (steps != 0) {
+                float nextCalibration = secretVoltageCalibration +
+                                        steps * VOLTAGE_CALIBRATION_STEP;
+                secretVoltageCalibration = constrain(nextCalibration,
+                                                     VOLTAGE_CALIBRATION_MIN,
+                                                     VOLTAGE_CALIBRATION_MAX);
+                // Apply the pending calibration immediately so the next ADC
+                // refresh uses the same adjusted value shown on screen.
+                voltageCalibrationFactor = secretVoltageCalibration;
+                encoder.setCount((int64_t)lroundf(secretVoltageCalibration / VOLTAGE_CALIBRATION_STEP));
+                lastEncoderCount = encoder.getCount();
+                currentMainsVoltage = secretVoltageReference * secretVoltageCalibration;
+                drawSecretVoltageCalibrationScreen(secretVoltageCalibration, currentMainsVoltage);
             }
         } else if (currentScreen == SCREEN_OTA) {
             // UPDATE_AVAILABLE and VERSION_CURRENT both have selectable button pairs
@@ -879,7 +947,10 @@ void loop() {
                     case 1:  // PP Sensitivity
                         enterSecretSensitivity();
                         break;
-                    case 2:  // Return to About
+                    case 2:  // Voltage Calibration
+                        enterSecretVoltageCalibration();
+                        break;
+                    case 3:  // Return to About
                     default:
                         enterAboutScreen();
                         break;
@@ -895,6 +966,11 @@ void loop() {
                 // Save the sensitivity multiplier
                 powerPauseSensitivityPct = secretSensitivityPct;
                 setSpikeMultiplierSafe(powerPauseSensitivityPct / 100.0f);
+                saveSettings();
+                enterSecretMenu();
+
+            } else if (currentScreen == SCREEN_SECRET_VOLTAGE_CALIBRATION) {
+                voltageCalibrationFactor = secretVoltageCalibration;
                 saveSettings();
                 enterSecretMenu();
 
@@ -1080,11 +1156,20 @@ void loop() {
                             : 0;
 
         // analogReadMilliVolts gives mV; 1000 mV = 1 V.
-        currentMainsVoltage = (crestAdcMv / 10.0f) * VOLTAGE_MAINS_SCALE;
+        currentMainsVoltage = (crestAdcMv / 10.0f) * VOLTAGE_MAINS_SCALE *
+                      voltageCalibrationFactor;
 
         portENTER_CRITICAL(&motorShared.mutex);
         motorShared.mainsVoltage = currentMainsVoltage;
         portEXIT_CRITICAL(&motorShared.mutex);
+
+        static unsigned long lastCalibrationDisplay = 0;
+        if (currentScreen == SCREEN_SECRET_VOLTAGE_CALIBRATION &&
+            millis() - lastCalibrationDisplay >= 100) {
+            lastCalibrationDisplay = millis();
+            drawSecretVoltageCalibrationScreen(secretVoltageCalibration,
+                                                currentMainsVoltage);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1094,6 +1179,21 @@ void loop() {
         static IdleState lastIdleState      = IDLE_STATE_OFF;
         static uint32_t  idleHoldEntryTime  = 0;
         bool             forceOverlayDraw   = false;  // set true when entering a new idle state
+
+#if DEBUG_POWERPAUSE_EXIT_POPUP
+        if (powerPauseDebugPopupUntil != 0 && millis() >= powerPauseDebugPopupUntil) {
+            powerPauseDebugPopupUntil = 0;
+            drawRuntimeStatic(displayUnits);
+            drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
+            drawRuntimeMotorPower(displaySpeed, true);
+            drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+            drawRuntimeMainsVoltage(currentMainsVoltage, true);
+            drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
+        }
+        if (powerPauseDebugPopupUntil != 0) {
+            return;
+        }
+#endif
 
         // Track idle state transitions for job timer and overlay
         if (idleState != lastIdleState) {

@@ -222,9 +222,9 @@
 // Motor speed decreases at a constant rate until pressure drops below PP_RAMP_TARGET_PSI.
 // Trigger detection: if pressure falls faster than PP_RAMP_TRIGGER_DROP_PSI over the
 // ring-buffer window, the user has pulled the trigger and we exit PowerPause.
-#define PP_RAMP_SPEED_DEC_PER_SEC   100     // Speed units/second to decrease (100 = 10%/s)
+#define PP_RAMP_SPEED_DEC_PER_SEC   80     // Speed units/second to decrease (100 = 10%/s)
 #define PP_RAMP_TARGET_PSI          2.8f    // Pressure target that ends the descent phase
-#define PP_RAMP_TRIGGER_DROP_PSI    0.4f    // Max PSI drop in the buffer window before trigger exit
+#define PP_RAMP_TRIGGER_DROP_PSI    0.42f    // Max PSI drop in the buffer window before trigger exit
 #define PP_RAMP_OVERPRESSURE_PSI    3.0f    // Pressure above this in stability phase → trigger-pull exit
 #define PP_SENSITIVITY_STEP     10      // 10% per encoder detent
 
@@ -335,6 +335,9 @@
 // Scale: 1V on ADC input = VOLTAGE_MAINS_SCALE V of mains.
 #define VOLTAGE_SENSOR_PIN      16      // IO16 - Mains voltage divider ADC input
 #define VOLTAGE_MAINS_SCALE     1.82f  // V_mains per V_adc (115 * 1.4 calibration factor)
+#define VOLTAGE_CALIBRATION_MIN 0.50f  // 50% of the nominal voltage scale
+#define VOLTAGE_CALIBRATION_MAX 1.50f  // 150% of the nominal voltage scale
+#define VOLTAGE_CALIBRATION_STEP 0.01f // 1% adjustment per encoder detent
 #define VOLTAGE_SAMPLE_INTERVAL_US 1000 // Sample the AC waveform every 1 ms
 #define VOLTAGE_PEAK_SAMPLE_COUNT   20  // One full 50 Hz cycle of samples
 #define VOLTAGE_OUTLIER_COUNT        3  // Discard the highest isolated spike
@@ -343,7 +346,8 @@
 // ============================================================================
 // Debug Flags
 // ============================================================================
-#define DEBUG_SERIAL_OUTPUT     1   // 1 = enable serial debug in loop()
+#define DEBUG_SERIAL_OUTPUT     0   // 1 = enable serial debug in loop()
+#define DEBUG_POWERPAUSE_EXIT_POPUP 1 // 1 = show PowerPause transition reasons on screen
 // Add -DTRIAC_DEBUG_SERIAL to build_flags to enable triac ISR diagnostics
 // Add -DSIMULATE_AC_60HZ    to build_flags to simulate zero crossings
 

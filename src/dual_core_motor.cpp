@@ -240,8 +240,10 @@ void motorControlTask(void *parameter) {
             smoothedPressure = (smoothingAlpha * reading.pressurePsi) + 
                                ((1.0f - smoothingAlpha) * smoothedPressure);
 
-            if (idleExitRequested && idleState != IDLE_STATE_OFF) {
-                publishPowerPauseExit(POWERPAUSE_EXIT_MANUAL, smoothedPressure, (float)idleState);
+            if (idleExitRequested) {
+                if (idleState != IDLE_STATE_OFF) {
+                    publishPowerPauseExit(POWERPAUSE_EXIT_MANUAL, smoothedPressure, (float)idleState);
+                }
                 idleState           = IDLE_STATE_OFF;
                 idleCounter         = 0;
                 idleStableCounter   = 0;

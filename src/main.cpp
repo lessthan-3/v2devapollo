@@ -121,6 +121,13 @@ int32_t     otaScrollAccumulator    = 0;
 uint8_t     supportMenuIndex        = 0;
 int32_t     supportScrollAccumulator = 0;
 
+static uint8_t wrapMenuIndex(int32_t index, uint8_t itemCount) {
+    if (itemCount == 0) return 0;
+    int32_t wrapped = index % itemCount;
+    if (wrapped < 0) wrapped += itemCount;
+    return (uint8_t)wrapped;
+}
+
 // Hour meter save tracking
 unsigned long lastHourMeterUpdate   = 0;
 
@@ -612,8 +619,7 @@ void loop() {
             while (menuScrollAccumulator >= 2)  { steps++;  menuScrollAccumulator -= 2; }
             while (menuScrollAccumulator <= -2) { steps--;  menuScrollAccumulator += 2; }
             if (steps != 0) {
-                int32_t newIdx = constrain((int32_t)menuIndex + steps, 0, MENU_OPTION_COUNT - 1);
-                menuIndex = (uint8_t)newIdx;
+                menuIndex = wrapMenuIndex((int32_t)menuIndex + steps, MENU_OPTION_COUNT);
                 encoder.setCount(menuIndex);
                 lastEncoderCount = encoder.getCount();
                 drawMenuScreen(menuIndex, false);
@@ -633,10 +639,8 @@ void loop() {
                 while (runtimeEncAcc <= -2) { steps--;  runtimeEncAcc += 2; }
 
                 if (steps != 0) {
-                    if (idleState != IDLE_STATE_OFF) {
-                        requestIdleExitSafe();
-                        resumeJobTimer();
-                    }
+                    requestIdleExitSafe();
+                    if (idleState != IDLE_STATE_OFF) resumeJobTimer();
                     float newTarget = targetPsi + (steps * TARGET_PSI_STEP);
                     targetPsi = constrain(newTarget, TARGET_PSI_MIN, TARGET_PSI_MAX);
                     setTargetPressureSafe(targetPsi);
@@ -645,6 +649,7 @@ void loop() {
                     if (targetPsi <= TARGET_PSI_MIN) {
                         setMotorEnabledSafe(false);
                         pauseJobTimer();
+                        displaySpeed = 0;
                         // Only update display if the overtemp overlay isn't covering the screen
                         if (!overTempWarning) drawRuntimeMotorPower(0, true);
                     } else {
@@ -714,7 +719,7 @@ void loop() {
                 while (settingsScrollAccumulator <= -2) { steps--;  settingsScrollAccumulator += 2; }
                 if (steps != 0) {
                     uint8_t prev = settingsIndex;
-                    settingsIndex = (uint8_t)constrain((int32_t)settingsIndex + steps, 0, SETTINGS_OPTION_COUNT - 1);
+                    settingsIndex = wrapMenuIndex((int32_t)settingsIndex + steps, SETTINGS_OPTION_COUNT);
                     encoder.setCount(settingsIndex);
                     lastEncoderCount = encoder.getCount();
                     if (prev != settingsIndex) {
@@ -733,7 +738,7 @@ void loop() {
             while (supportScrollAccumulator <= -2) { steps--;  supportScrollAccumulator += 2; }
             if (steps != 0) {
                 uint8_t prev = supportMenuIndex;
-                supportMenuIndex = (uint8_t)constrain((int32_t)supportMenuIndex + steps, 0, SUPPORT_OPTION_COUNT - 1);
+                supportMenuIndex = wrapMenuIndex((int32_t)supportMenuIndex + steps, SUPPORT_OPTION_COUNT);
                 encoder.setCount(supportMenuIndex);
                 lastEncoderCount = encoder.getCount();
                 if (prev != supportMenuIndex) {
@@ -747,7 +752,7 @@ void loop() {
             while (timersScrollAccumulator >= 2)  { steps++;  timersScrollAccumulator -= 2; }
             while (timersScrollAccumulator <= -2) { steps--;  timersScrollAccumulator += 2; }
             if (steps != 0) {
-                timersIndex = (uint8_t)constrain((int32_t)timersIndex + steps, 0, 2);
+                timersIndex = wrapMenuIndex((int32_t)timersIndex + steps, 3);
                 encoder.setCount(timersIndex);
                 lastEncoderCount = encoder.getCount();
                 drawTimersScreen(totalRuntimeTenths, totalJobTimeTenths, timersIndex);
@@ -777,7 +782,7 @@ void loop() {
             while (secretMenuScrollAccum >= 2)  { steps++;  secretMenuScrollAccum -= 2; }
             while (secretMenuScrollAccum <= -2) { steps--;  secretMenuScrollAccum += 2; }
             if (steps != 0) {
-                secretMenuIndex = (uint8_t)constrain((int32_t)secretMenuIndex + steps, 0, 3);
+                secretMenuIndex = wrapMenuIndex((int32_t)secretMenuIndex + steps, 4);
                 encoder.setCount(secretMenuIndex);
                 lastEncoderCount = encoder.getCount();
                 drawSecretMenu(secretMenuIndex);
@@ -838,7 +843,7 @@ void loop() {
                 while (otaScrollAccumulator >= 2)  { steps++;  otaScrollAccumulator -= 2; }
                 while (otaScrollAccumulator <= -2) { steps--;  otaScrollAccumulator += 2; }
                 if (steps != 0) {
-                    otaSelectedOption = (uint8_t)constrain((int32_t)otaSelectedOption + steps, 0, 1);
+                    otaSelectedOption = wrapMenuIndex((int32_t)otaSelectedOption + steps, 2);
                     encoder.setCount(otaSelectedOption);
                     lastEncoderCount = encoder.getCount();
                     drawOtaScreen(otaStatus.state, otaStatus.latestVersion, 0, otaSelectedOption, false);

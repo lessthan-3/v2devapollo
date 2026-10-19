@@ -793,6 +793,7 @@ void motorControlTask(void *parameter) {
             // Motor disabled or target set to zero — keep motor off
             setMotorSpeed(0);
             lastSpeed = 0;
+            smoothedPressure = 0.0f;
             pidReset(&motorPid);
             idleState           = IDLE_STATE_OFF;
             idleCounter         = 0;
@@ -811,13 +812,15 @@ void motorControlTask(void *parameter) {
             rampDescendComplete = false;
 
             portENTER_CRITICAL(&motorShared.mutex);
-            if (valid) {
-                motorShared.currentPsi = reading.pressurePsi;
-                motorShared.rawPressure = reading.rawValue;
-                motorShared.smoothedPsi = smoothedPressure;
-            } else {
-                motorShared.rawPressure = 0;
-            }
+            motorShared.currentPsi = 0.0f;
+            motorShared.rawPressure = 0;
+            motorShared.smoothedPsi = 0.0f;
+            motorShared.motorSpeed = 0;
+            motorShared.pidOutput = 0.0f;
+            motorShared.pressureValid = valid;
+            motorShared.idleSecondsRemaining = UINT32_MAX;
+            motorShared.idleState = IDLE_STATE_OFF;
+            motorShared.isMax = false;
             portEXIT_CRITICAL(&motorShared.mutex);
         } else {
             // Sensor error - disable motor for safety

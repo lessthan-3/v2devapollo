@@ -347,7 +347,7 @@
 // Debug Flags
 // ============================================================================
 #define DEBUG_SERIAL_OUTPUT     0   // 1 = enable serial debug in loop()
-#define DEBUG_POWERPAUSE_EXIT_POPUP 1 // 1 = show PowerPause transition reasons on screen
+#define DEBUG_POWERPAUSE_EXIT_POPUP 0 // 1 = show PowerPause transition reasons on screen
 // Add -DTRIAC_DEBUG_SERIAL to build_flags to enable triac ISR diagnostics
 // Add -DSIMULATE_AC_60HZ    to build_flags to simulate zero crossings
 

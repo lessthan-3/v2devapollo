@@ -546,6 +546,7 @@ void loop() {
     static uint32_t      lastPowerPauseExitEvent = 0;
     static unsigned long powerPauseDebugPopupUntil = 0;
     static char          powerPauseDebugMessage[96] = {};
+    static bool          powerPauseExitRedrawPending = false;
 
     // Read shared motor-task data
     {
@@ -640,7 +641,17 @@ void loop() {
 
                 if (steps != 0) {
                     requestIdleExitSafe();
-                    if (idleState != IDLE_STATE_OFF) resumeJobTimer();
+                    if (idleState != IDLE_STATE_OFF) {
+                        resumeJobTimer();
+                        powerPauseExitRedrawPending = true;
+                        drawRuntimeStatic(displayUnits);
+                        drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits,
+                                          displayValid, true, 0);
+                        drawRuntimeMotorPower(0, true);
+                        drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+                        drawRuntimeMainsVoltage(currentMainsVoltage, true);
+                        drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
+                    }
                     float newTarget = targetPsi + (steps * TARGET_PSI_STEP);
                     targetPsi = constrain(newTarget, TARGET_PSI_MIN, TARGET_PSI_MAX);
                     setTargetPressureSafe(targetPsi);
@@ -1247,6 +1258,16 @@ void loop() {
             drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
         }
 
+        if (powerPauseExitRedrawPending && idleState == IDLE_STATE_OFF) {
+            powerPauseExitRedrawPending = false;
+            drawRuntimeStatic(displayUnits);
+            drawRuntimeTarget(targetPsi, smoothedPressure, displayUnits, displayValid, true, displaySpeed);
+            drawRuntimeMotorPower(displaySpeed, true);
+            drawRuntimeJobTime(totalSystemTimeTenths * 360UL, true);
+            drawRuntimeMainsVoltage(currentMainsVoltage, true);
+            drawRuntimeTemperature(currentTemperatureC, displayUnits, true);
+        }
+
         // 1-second overtemp warning buzz — cut off automatically
         if (overTempWarnBuzzStart != 0 && (millis() - overTempWarnBuzzStart) >= 1000UL) {
             setBeeper(false);
@@ -1303,7 +1324,8 @@ void loop() {
 
         bool showOverTempOverlay = overTempShutdown || (overTempWarning && overTempOverlayShown);
 
-        if (!overTempShutdown && !overTempWarning && idleState != IDLE_STATE_OFF) {
+        if (!overTempShutdown && !overTempWarning && idleState != IDLE_STATE_OFF &&
+            !powerPauseExitRedrawPending) {
             uint32_t timeoutRemaining = UINT32_MAX;
             if (idleState == IDLE_STATE_HOLD) {
                 uint32_t idleDuration = (millis() - idleHoldEntryTime) / 1000;
